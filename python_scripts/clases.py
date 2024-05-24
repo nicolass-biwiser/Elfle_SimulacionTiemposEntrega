@@ -61,7 +61,7 @@ class Pedido:
     hora_fin_pckSIMA: datetime = None
     hora_fin_pckSIMB: datetime = None
     hora_fin_pckSIMC: datetime = None
-    fecha_termino: datetime = None
+    mov_entregado: datetime = None
     # finpck_termino: datetime = None
     REAL_pred_ini_pck: float = 0.0
     REAL_predA: float = 0.0
@@ -77,7 +77,7 @@ class Pedido:
     REAL_hora_fin_pckA: datetime = None
     REAL_hora_fin_pckB: datetime = None
     REAL_hora_fin_pckC: datetime = None
-    REAL_fecha_termino: datetime = None
+    REAL_mov_entregado: datetime = None
 
     time_A: datetime = None
     time_B: datetime = None

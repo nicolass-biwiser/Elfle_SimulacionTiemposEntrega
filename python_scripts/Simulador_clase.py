@@ -128,7 +128,7 @@ class Meson:
                 - pedido_completado: El pedido completado.
                 """
         pedido_completado = self.pedido_actual
-        pedido_completado.fecha_termino = generar_time(hora_inicio, tiempo)
+        pedido_completado.mov_entregado = generar_time(hora_inicio, tiempo)
         pedido_completado.hora_fin_revision = generar_time(hora_inicio, tiempo)
         if len(self.cola) > 0:
             p = self.cola.popleft()
@@ -142,7 +142,8 @@ class Meson:
 
 
 class Simulador:
-    def __init__(self, df_dia, df_pasillo, prod_pass, dict_cols, lista_productos):
+    def __init__(self, df_dia, df_pasillo, prod_pass, dict_cols, lista_productos, mod_a, mod_b, mod_c, mod_,sim,
+                 resultado_bbdd, hora_dia):
         """
                 Inicializa un objeto Simulador.
 
@@ -184,7 +185,13 @@ class Simulador:
         self.verificar_meson = {}
         self.completados = []
         self.resultados = {}
-
+        self.mod_a = mod_a
+        self.mod_b = mod_b
+        self.mod_c = mod_c
+        self.mod_ = mod_
+        self.sim = sim
+        self.hora_dia = hora_dia
+        self.resultado_bbdd= resultado_bbdd
     def proximo_evento(self):
         """
                 Encuentra el próximo evento en la simulación.
@@ -335,11 +342,19 @@ class Simulador:
                 None
                 """
         print('Añadiendo todos los eventos llegada')
+        # NECESITO HORA ACTUAL O DE INICIO PARA FILTRAR INFO QUE TENGO REAL VS PRED. PRED DEBO ASUMIR QUE LO TENGO GUARDADO
+        # teoricamente esa tabla va a ser lo que guarde en bbdd.
+        # INICIO Y FIN DE CADA ETAPA.
+        #
         for i in range(len(self.df_dia)):
-            p = nuevo_pedido(i, self.df_dia, self.df_pasillo, self.prod_pass ,self.dict_cols ,self.lista_productos)
-            delta_time = p.hora_llamado - self.hora_inicio
+            p = nuevo_pedido(i, self.df_dia, self.df_pasillo, self.prod_pass ,self.dict_cols ,
+                             self.lista_productos, self.mod_a, self.mod_b, self.mod_c, simulado=self.sim,
+                             resultado_bbdd=self.resultado_bbdd)
+            delta_time = p.hora_ini_pck - self.hora_inicio
             one_second = np.timedelta64(1000000000, 'ns')
             seconds = delta_time / one_second
+            # NO TODOS SON LLEGA_PEDIDO
+            print(p)
             self.eventos.append(('llega_pedido', seconds, p))
         print('Eventos llegada finalizado')
 
@@ -358,8 +373,10 @@ class Simulador:
         self.add_evento_llegada()  # añado todos los eventos de llegada.
         t1 = time.time()
         print(f'Tiempo transcurrido en add_evento_llegada {round(t1 - t0, 2)}')
+        # print(f'Pedidos completados {len(self.completados)}/{len(self.df_dia)}')
         print(f'Pedidos completados {len(self.completados)}/{len(self.df_dia)}')
         while continuar:
+
             # eventos
             # EN ESTAS PRUEBAS CONVIENE PONER TODOS LOS PEDIDOS POR LLEGAR INICIALMENTE A EVENTO
             # escojo nuevo evento
