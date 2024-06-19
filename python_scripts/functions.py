@@ -910,3 +910,7 @@ def actualizar_modelos_pck():
         print("Test set RMSE: ", rmse)
         print("Test set mae: ", mae)
         best_model.save_model(f"df/input/models/best_xgboost_model_{label}.json")
+    database_url = get_database_url(resultados=True)
+    engine = create_engine(database_url)
+    df_pasillo2.to_sql('pasillo_historico', engine,index=False, if_exists='append')
+    tiempos_pck2.to_sql('tiempos_pck_historico',engine, index=False, if_exists='append')
