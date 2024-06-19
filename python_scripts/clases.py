@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Dict
-from datetime import datetime
+import datetime
 from pandas import DataFrame
 
 @dataclass
@@ -20,16 +20,16 @@ class Operario:
     acceso_pasillo: list = field(default_factory=list)
 @dataclass
 class Pasillo:
-    fecha_in: datetime
-    fecha_out: datetime
+    fecha_in: datetime.datetime
+    fecha_out: datetime.datetime
     nombre: str = ""
     productos: Dict[str, Producto] = field(default_factory=dict)
     operario = None
 
 @dataclass
 class Pedido:
-    hora_meson: datetime
-    hora_llamado: datetime
+    hora_meson: datetime.datetime
+    hora_llamado: datetime.datetime
     folio: str = ""
     # nombre: str = ""
     doc: str = ''
@@ -47,49 +47,41 @@ class Pedido:
     predC: float = 0.0
     pred_max: float  = 0.0
     pred_: float = 0.0
-    hora_ini_pck: datetime = None
-    hora_ini_pckA: datetime = None
-    hora_ini_pckB: datetime = None
-    hora_ini_pckC: datetime = None
-    hora_fin_pck: datetime = None
-    hora_fin_pckA: datetime = None
-    hora_fin_pckB: datetime = None
-    hora_fin_pckC: datetime = None
-    hora_ini_revision: datetime = None
-    hora_fin_revision: datetime = None
+    hora_ini_pck: datetime.datetime = None
+    hora_ini_pckA: datetime.datetime = None
+    hora_ini_pckB: datetime.datetime = None
+    hora_ini_pckC: datetime.datetime = None
+    hora_fin_pck: datetime.datetime = None
+    hora_fin_pckA: datetime.datetime = None
+    hora_fin_pckB: datetime.datetime = None
+    hora_fin_pckC: datetime.datetime = None
+    hora_ini_revision: datetime.datetime = None
+    hora_fin_revision: datetime.datetime = None
 
-    hora_fin_pckSIMA: datetime = None
-    hora_fin_pckSIMB: datetime = None
-    hora_fin_pckSIMC: datetime = None
-    mov_entregado: datetime = None
-    # finpck_termino: datetime = None
+    hora_fin_pckSIMA: datetime.datetime = None
+    hora_fin_pckSIMB: datetime.datetime = None
+    hora_fin_pckSIMC: datetime.datetime = None
+    mov_entregado: datetime.datetime = None
+    # finpck_termino: datetime.datetime = None
     REAL_pred_ini_pck: float = 0.0
     REAL_predA: float = 0.0
     REAL_predB: float = 0.0
     REAL_predC: float = 0.0
     REAL_pred_max: float = 0.0
     REAL_pred_: float = 0.0
-    REAL_hora_ini_pck: datetime = None
-    REAL_hora_ini_pckA: datetime = None
-    REAL_hora_ini_pckB: datetime = None
-    REAL_hora_ini_pckC: datetime = None
-    REAL_hora_fin_pck: datetime = None
-    REAL_hora_fin_pckA: datetime = None
-    REAL_hora_fin_pckB: datetime = None
-    REAL_hora_fin_pckC: datetime = None
-    REAL_mov_entregado: datetime = None
+    REAL_hora_ini_pck: datetime.datetime = None
+    REAL_hora_ini_pckA: datetime.datetime = None
+    REAL_hora_ini_pckB: datetime.datetime = None
+    REAL_hora_ini_pckC: datetime.datetime = None
+    REAL_hora_fin_pck: datetime.datetime = None
+    REAL_hora_fin_pckA: datetime.datetime = None
+    REAL_hora_fin_pckB: datetime.datetime = None
+    REAL_hora_fin_pckC: datetime.datetime = None
+    REAL_mov_entregado: datetime.datetime = None
 
-    time_A: datetime = None
-    time_B: datetime = None
-    time_C: datetime = None
-
-    # total_items: int = 0
-    # total_cantidad: int = 0
-    # productos : Dict[str, Producto] = field(default_factory=dict)
-    # pasillos: Dict[str, Pasillo] = field(default_factory=dict)
-
-    #
-
+    time_A: datetime.datetime = None
+    time_B: datetime.datetime = None
+    time_C: datetime.datetime = None
 
 
 

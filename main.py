@@ -55,98 +55,96 @@ if simulado:
                                                      p.fecha_termino]
     resultados_bbdd.to_excel('resultados_bbdd.xlsx', index=False)
     r = calcular_resultados(pedidos_completados)
-    # resultados_dia['total'] = r
-    # df = pd.DataFrame.from_dict(resultados_dia, orient='index')
-    # df.to_excel("resultados_simulacion 60dias.xlsx")
 
-# CASO REAL
-# SE ASUME que las 3 dataset vienen ya filtrado pro dia, si no, entonces se debe aplicar lo coemntado
-
-# dia = datetime(2023,12,4) + timedelta(days=+day)
-# df_dia = filt_day(tiempos_pck, 'mov_llamado', dia)
-# df_dia = df_dia.drop_duplicates(subset="mov_folio")
 else:
-    # resultados_bbdd_iteracion = pd.DataFrame(
-    #     columns=['Doc', 'mov_folio', 'mov_llamado', 'pred_ini_pck', 'hora_ini_pck', 'predA', 'hora_ini_pckA',
-    #              'hora_fin_pckA',
-    #              'predB', 'hora_ini_pckB', 'hora_fin_pckB',
-    #              'predC', 'hora_ini_pckC', 'hora_fin_pckC',
-    #              'hora_fin_pck',
-    #              'pred_',
-    #              'mov_entregado', 'version_control'])
-    # i = 0
-    iterar = True
-
 
     prod_vol = cargar_productos_voluminosos()
-    # Esto solo para probar
 
-    # ESTA LINEA DEBE CAMBIAR POR LA QUERY
-
-    # añadir query resultados ultimos 30 para utilizar info
     resultados_bbdd = fetch_latest_results(30)
     dict_cols = cargar_columnas_df()
     prod_pass = cargar_productos_pasillos()
     lista_productos = prod_vol['Cod. Producto'].unique().tolist()
+    i = 0
+    #hora_dia = datetime.now()
 
-    while True:
+    while datetime.now().hour < 18:
+
         df_dia, df_pasillo = cargar_informacion(simulado)
-
-        resultados_bbdd_iteracion = pd.DataFrame(
-            columns=['Doc', 'mov_folio', 'mov_llamado', 'pred_ini_pck', 'hora_ini_pck', 'predA', 'hora_ini_pckA',
-                     'hora_fin_pckA',
-                     'predB', 'hora_ini_pckB', 'hora_fin_pckB',
-                     'predC', 'hora_ini_pckC', 'hora_fin_pckC',
-                     'hora_fin_pck',
-                     'pred_',
-                     'mov_entregado', 'version_control'])
-        folios_listos = resultados_bbdd.mov_folio.unique.tolist()
         hora_dia = datetime.now()
-        print(f'Hora dia {hora_dia}')
-        # CARGAR INFO EN ESTE CASO DEBERIA CONECTARSE A BBDD
-        # df_pasillo, tiempos_pck = cargar_informacion(simulado)
-        df_dia = df_dia.drop_duplicates(subset="mov_folio", keep='last')
-        # df_dia = df_dia[df_dia['mov_entregado'].isnull()]
-        # ESTO NO DEBERIA IR DESPUES
-        # df_dia_ = df_dia[(df_dia.mov_llamado < hora_dia) & (df_dia.mov_entregado > hora_dia)]
-        # print(f"len df_dia: {len(df_dia_)}")
-
-        folios = set(df_dia.mov_folio.unique())
-        df_pasillo_ = df_pasillo[df_pasillo.Folio.isin(folios)]
-        folio_bbdd = set(resultados_bbdd.mov_folio.unique())
-        # SI ESTÁ LA INFO ENTONCES USO LA INFO, SI NO DATA ANTIGUA YA PREDICHA
-        if len(folios - folio_bbdd) > 0:
-            print(f'set folios {folios - folio_bbdd} = {folios}\n{folio_bbdd}')
-            sim = Simulador(df_dia, df_pasillo_, prod_pass, dict_cols, lista_productos, mod_a, mod_b, mod_c, mod_,
-                            simulado,
-                            resultados_bbdd, hora_dia)
-            t00 = time.time()
-            sim.run()
-            for p in sim.completados:
-                if p.folio not in folios_listos:
-                    resultados_bbdd_iteracion.loc[len(resultados_bbdd_iteracion)] = [p.doc, p.folio, p.hora_llamado,
-                                                                                     p.pred_ini_pck,
-                                                                                     p.hora_ini_pck,
-                                                                                     p.predA, p.hora_ini_pckA,
-                                                                                     p.hora_fin_pckA,
-                                                                                     p.predB, p.hora_ini_pckB,
-                                                                                     p.hora_fin_pckB,
-                                                                                     p.predC, p.hora_ini_pckC,
-                                                                                     p.hora_fin_pckC,
-                                                                                     p.hora_fin_pck,
-                                                                                     p.pred_,
-                                                                                     p.mov_entregado, hora_dia]
-
-            if len(resultados_bbdd_iteracion) > 0:
-                database_url = get_database_url(resultados=True)
-                engine = create_engine(database_url)
-                resultados_bbdd_iteracion.to_sql('prediccion_pck', engine, if_exists='append',index=False)
-                resultados_bbdd = pd.concat([resultados_bbdd, resultados_bbdd_iteracion])
-                resultados_bbdd = keep_last_n_rows(resultados_bbdd)
-            t11 = time.time()
-
-            print(f'Tiempo transcurrido {round(t11 - t00, 2)}')
-        # FALTA REVISAR TABLAS PARA ENVIAR RESULTADOS
-        else:
+        print(f"**************** ITER {i} : {hora_dia} | {hora_dia.hour}****************")
+        if (df_dia is None) or (df_pasillo is None):
+            print('NO SE CAPTURÓ INFORMACIÓN - WAIT SEC')
             # No hay información nueva.
-            time.sleep(4)
+            time.sleep(20)
+            i += 1
+        else:
+            resultados_bbdd_iteracion = pd.DataFrame(
+                columns=['Doc', 'mov_folio', 'mov_llamado', 'pred_ini_pck', 'hora_ini_pck','inicio_colab', 'predA', 'hora_ini_pckA',
+                         'hora_fin_pckA',
+                         'predB', 'hora_ini_pckB', 'hora_fin_pckB',
+                         'predC', 'hora_ini_pckC', 'hora_fin_pckC',
+                         'hora_fin_pck',
+                         'pred_',
+                         'mov_entregado', 'pred_total', 'version_control'])
+            folios_listos = resultados_bbdd.mov_folio.unique().tolist()
+
+
+            df_dia = df_dia.drop_duplicates(subset="mov_folio", keep='last')
+
+
+            folios = set(df_dia.mov_folio.unique())
+            df_pasillo_ = df_pasillo[df_pasillo.Folio.isin(folios)]
+            folio_bbdd = set(folios_listos)
+            # SI ESTÁ LA INFO ENTONCES USO LA INFO, SI NO DATA ANTIGUA YA PREDICHA
+            if len(folios - folio_bbdd) > 0:
+                print('INICIANDO SIMULADOR')
+                print(folios - folio_bbdd)
+                #print(f'set folios {folios - folio_bbdd} = {folios}\n{folio_bbdd}')
+                sim = Simulador(df_dia, df_pasillo_, prod_pass, dict_cols, lista_productos, mod_a, mod_b, mod_c, mod_,
+                                simulado,
+                                resultados_bbdd, hora_dia)
+                t00 = time.time()
+                sim.run()
+                for p in sim.completados:
+                    if p.folio not in folios_listos:
+                        datetime_series = pd.Series([p.hora_ini_pckA,  p.hora_ini_pckB, p.hora_ini_pckC])
+                        resultados_bbdd_iteracion.loc[len(resultados_bbdd_iteracion)] = [p.doc, p.folio, p.hora_llamado,
+                                                                                         p.pred_ini_pck,
+                                                                                         p.hora_ini_pck,
+                                                                                         datetime_series.min(skipna=True),
+                                                                                         p.predA, p.hora_ini_pckA,
+                                                                                         p.hora_fin_pckA,
+                                                                                         p.predB, p.hora_ini_pckB,
+                                                                                         p.hora_fin_pckB,
+                                                                                         p.predC, p.hora_ini_pckC,
+                                                                                         p.hora_fin_pckC,
+                                                                                         p.hora_fin_pck,
+                                                                                         p.pred_,
+                                                                                         p.mov_entregado,
+                                                                                         int((p.mov_entregado - p.hora_llamado).total_seconds()),
+                                                                                         hora_dia]
+                    else:
+                        print(f'{p.folio} ya está en folioslistos {folios_listos}')
+                if len(resultados_bbdd_iteracion) > 0:
+                    database_url = get_database_url(resultados=True)
+                    engine = create_engine(database_url)
+                    resultados_bbdd_iteracion.to_sql('prediccion_pck', engine, if_exists='append',index=False)
+                    resultados_bbdd = pd.concat([resultados_bbdd, resultados_bbdd_iteracion])
+                    print(f'Se envian a BBDD {resultados_bbdd_iteracion.shape}')
+                    # resultados_bbdd = keep_last_n_rows(resultados_bbdd)
+                t11 = time.time()
+
+                print(f'Tiempo transcurrido {round(t11 - t00, 2)}')
+                i += 1
+            # FALTA REVISAR TABLAS PARA ENVIAR RESULTADOS
+            else:
+                print('NO HAY INFORMACIÓN NUEVA')
+                # No hay información nueva.
+                time.sleep(10)
+                i+= 1
+            if datetime.now().hour >= 18:
+                break
+    print("Dia finalizado")
+    actualizar_modelos_pck()
+
+

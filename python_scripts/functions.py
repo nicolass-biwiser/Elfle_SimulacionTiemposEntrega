@@ -1,15 +1,33 @@
 import datetime
-import traceback
 import numpy as np
 import pandas as pd
+import traceback
 from python_scripts.clases import *
 from datetime import timedelta
 from xgboost import XGBRegressor
-import json
 from warnings import simplefilter
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+import xgboost as xgb
+from sklearn.model_selection import RandomizedSearchCV, train_test_split
+import json
+from sklearn.metrics import mean_absolute_error,mean_squared_error
 from sqlalchemy import create_engine
 simplefilter(action="ignore", category=pd.errors.PerformanceWarning)
+
+
+def cargar_modelos():
+    mod_a = XGBRegressor()
+    mod_a.load_model('df/input/models/best_xgboost_model_Dif_a.json')
+
+    mod_b = XGBRegressor()
+
+    mod_b.load_model('df/input/models/best_xgboost_model_Dif_b.json')
+
+    mod_c = XGBRegressor()
+    mod_c.load_model('df/input/models/best_xgboost_model_Dif_c.json')
+
+    mod_ = XGBRegressor()
+    mod_.load_model('df/input/models/xgb_model_Fin_pck-mov_hora_control.json')
+    return mod_a, mod_b, mod_c, mod_
 
 
 def cargar_productos_voluminosos():
@@ -26,6 +44,8 @@ def get_database_url(resultados=True):
 
         # Construir la URL de conexión
         database_url = f"mssql+pyodbc://{username}:{password}@{hostname}/{database}?driver=ODBC+Driver+17+for+SQL+Server"
+
+
     else:
         # Definir las credenciales y el URL de conexión
         username = 'usrview'
@@ -36,8 +56,6 @@ def get_database_url(resultados=True):
         # Construir la URL de conexión
         database_url = f"mysql+mysqlconnector://{username}:{password}@{hostname}/{database}"
     return database_url
-
-
 
 
 def fetch_data_from_view(view_name, engine, query=None):
@@ -55,12 +73,12 @@ def fetch_data_from_view(view_name, engine, query=None):
             query = f"SELECT * FROM {view_name}"
             df = pd.read_sql(query, engine)
 
-
         return df
 
     except Exception as e:
         print(f"Error al traer los datos de la vista {view_name}: {e}")
         return None
+
 
 def fetch_latest_results(n=100):
     try:
@@ -72,7 +90,6 @@ def fetch_latest_results(n=100):
 
         # Definir la consulta
         query = f"SELECT TOP {n} * FROM prediccion_pck ORDER BY version_control DESC"
-
 
         # Ejecutar la consulta y traer los datos en un DataFrame de pandas
         df = pd.read_sql(query, engine)
@@ -126,43 +143,76 @@ def cargar_informacion(sim):
         database_url = get_database_url(resultados=False)
         engine = create_engine(database_url)
         # PRIMERO CARGA TIEMPO
-        df_dia = fetch_data_from_view('vw_pck_docs', engine)
+        df_dia = fetch_data_from_view('vw_pck_docs', engine,
+                                      query='select * from vw_pck_docs where mov_entregado is null')
+        #df_dia = df_dia[(df_dia.mov_entregado.isnull())]
+        if len(df_dia) == 0 or df_dia.empty:
+            print('WARNING query a vw_pck_docs no trae información')
+            return None, None
         df_dia = df_dia.sort_values(by='mov_llamado')
         df_dia["mov_llamado"] = pd.to_datetime(df_dia["mov_llamado"])
         df_dia["mov_entregado"] = pd.to_datetime(df_dia["mov_entregado"])
         df_dia = df_dia[df_dia['mov_llamado'].dt.date == datetime.date.today()]
-        df_dia['Dif_a'] = df_dia['Dif_a'].apply(time_to_seconds)
-        df_dia['Dif_b'] = df_dia['Dif_b'].apply(time_to_seconds)
-        df_dia['Dif_c'] = df_dia['Dif_c'].apply(time_to_seconds)
-        df_dia = df_dia[(df_dia.mov_entregado.isnull())]
+        df_dia['difA'] = df_dia['difA'].apply(time_to_seconds)
+        df_dia['difB'] = df_dia['difB'].apply(time_to_seconds)
+        df_dia['difC'] = df_dia['difC'].apply(time_to_seconds)
+        df_dia['Fin_pck'] = pd.NaT
+        df_dia['dif_ini_fin'] = np.nan
+        #try:
+        #    df_dia['Fin_pck'] = df_dia[['finpck_A', 'finpck_B', 'finpck_C']].max(axis=1)
+        #    df_dia['dif_ini_fin'] = (df_dia['Fin_pck'] - df_dia['ini_pck']).dt.total_seconds()
+        #except Exception as e:
+        #    print(e)
+        #print('Error al crear columna dif_ini_fin',df_dia['Fin_pck'],df_dia['ini_pck'])
+        df_dia.rename({'difA': 'Dif_a', "difB": 'Dif_b', "difC": 'Dif_c', 'ini_pck': 'Ini_pck'}, axis=1, inplace=True)
         folios_relevantes = df_dia.mov_folio.unique()
         folios_relevantes = ','.join([f"'{folio}'" for folio in folios_relevantes])
         query = f"""
                 SELECT * 
                 FROM vw_pck_pas_docs
-                WHERE mov_folio IN ({folios_relevantes})
+                WHERE Folio IN ({folios_relevantes})
                 """
         # CARGA PASILLO , solo lso folios validos de df_dia
         df_pasillo = fetch_data_from_view('vw_pck_pas_docs', engine, query=query)
+        if (df_pasillo is None) or (len(df_pasillo) == 0) or (df_pasillo.empty):
+            print('WARNING query a vw_pck_pas_docs no trae información')
+            return None, None
+        #Revisar FIN_PCK -> cuantos pasillos espero  de esos si tienen fin entonces puedo sacar max else nada.
+        print('calculando_finck')
+        df_dia['Fin_pck'] = df_dia.apply(lambda x: fin_pck_alcanzado(x, df_pasillo[df_pasillo.Folio == x['mov_folio']]),
+                                         axis=1)
+        folio_dia = set(df_dia.mov_folio.unique())
+        folio_pasillo = set(df_pasillo.Folio.unique())
+        print(f'Folio no encontrado en vw_pck_pas_docs {folio_dia- folio_pasillo}')
+        inter = folio_dia.intersection(folio_pasillo)
 
+        df_dia = df_dia[df_dia.mov_folio.isin(list(inter))]
+        df_pasillo = df_pasillo[df_pasillo.Folio.isin(list(inter))]
         print('Finalizando Conexión a BBDD')
         return df_dia, df_pasillo
 
 
-def cargar_modelos():
-    mod_a = XGBRegressor()
-    mod_a.load_model('df/input/models/xgb_model_Dif_a.json')
+def fin_pck_alcanzado(row_dia, pasillos):
+    pasillos_utilizados = []
+    finalizado = True
+    if len(pasillos) > 0:
+        for index, row in pasillos.iterrows():
+            if row['Pasillo_A'] > 0:
+                pasillos_utilizados.append('finpck_A')
+            elif row['Pasillo_B'] > 0:
+                pasillos_utilizados.append('finpck_B')
+            else:
+                pasillos_utilizados.append('finpck_C')
+        for pas in set(pasillos_utilizados):
+            if pd.isnull(row_dia[pas]):
+                finalizado = False
+        if finalizado:
 
-    mod_b = XGBRegressor()
-
-    mod_b.load_model('df/input/models/xgb_model_Dif_b.json')
-
-    mod_c = XGBRegressor()
-    mod_c.load_model('df/input/models/xgb_model_Dif_c.json')
-
-    mod_ = XGBRegressor()
-    mod_.load_model('df/input/models/xgb_model_Fin_pck-mov_hora_control.json')
-    return mod_a, mod_b, mod_c, mod_
+            return row_dia[list(set(pasillos_utilizados))].max(skipna=True)
+        else:
+            return pd.NaT
+    else:
+        return pd.NaT
 
 
 def cargar_productos_pasillos():
@@ -226,124 +276,12 @@ def intervalo_hora(df, freq=1, target="Dif_a"):
     # print(df['Intervalo_Hora'])
     # print(type(df['Intervalo_Hora']))
     intervalo_encoded = pd.get_dummies(df['Intervalo_Hora'], prefix='Intervalo')
-    print(intervalo_encoded)
+    #print(intervalo_encoded)
     df_encoded = pd.concat([df, intervalo_encoded], axis=1)
     # target_ = df_encoded.pop(target)
     # df_encoded.insert(len(df_encoded.columns), target, target_)
     df_encoded.pop('Intervalo_Hora')
     return df_encoded
-
-
-def df_simulacion_creacion(label, df_pasillo, tiempos_pck, lista_productos, freq=1, corte=0, prod_pass=None,
-                           dict_cols=None):
-    """
-        Crea un DataFrame para simulación de creación.
-
-        Args:
-            label (str): La etiqueta del pasillo.
-            df_pasillo (DataFrame): El DataFrame de pasillos.
-            tiempos_pck (DataFrame): El DataFrame de tiempos de paquete.
-            lista_productos (list): La lista de productos.
-            freq (int): La frecuencia de los intervalos de hora.
-            corte (int): El valor de corte para los datos.
-            prod_pass (list): La lista de productos en el pasillo.
-            dict_cols (dict): Un diccionario con información de columnas.
-
-        Returns:
-            DataFrame: El DataFrame creado para simulación de creación.
-        """
-    if label != "":
-        if not prod_pass:
-            prod_pass = list(df_pasillo.dropna(subset=f'Pasillo_{label}').Producto.unique())
-        else:
-            prod_pass = prod_pass[label]
-        # print(f'Pasillo {label} tiene {len(prod_pass)} productos.')
-        df_melt = pd.melt(df_pasillo[df_pasillo['Producto'].isin(dict_cols[f'col{label}'][2:-16])],
-                          id_vars=['Folio', 'Producto'], value_vars=[f'Pasillo_{label}'], var_name="Pasillo").dropna(
-            subset='value')
-        if len(df_melt) == 0:
-            return []
-        df_pivot = df_melt.pivot_table(index=['Folio', 'Pasillo'], columns='Producto', values='value').reset_index()
-        df_pivot = df_pivot.fillna(0)
-        col = df_pivot.columns.tolist()
-        for p in dict_cols[f'col{label}'][2:-15]:
-            if not p in col:
-                df_pivot[p] = 0
-        # for p in prod_pass:
-        #    if not p in col:
-        #        df_pivot[p] = 0
-        df_pivot['#prod'] = df_pivot.drop(['Folio', "Pasillo"], axis=1).apply(contar_productos_mayores_que_cero, axis=1)
-
-        df_pivot = df_pivot.merge(tiempos_pck[['mov_llamado', 'mov_folio']], left_on='Folio',
-                                  right_on='mov_folio', how='left')
-        # .dropna(subset=[f'Dif_{label.lower()}']))
-        df_pivot["mov_llamado"] = pd.to_datetime(df_pivot["mov_llamado"])
-        df_pivot['hora'] = df_pivot['mov_llamado'].dt.hour
-        col = df_pivot.pop('hora')
-        df_pivot.insert(len(df_pivot.columns) - 3, 'hora', col)
-        df_pivot.pop('mov_llamado')
-        # df_pivot[f'Dif_{label.lower()}'] = df_pivot[f'Dif_{label.lower()}'].apply(
-        #     lambda x: timedelta(hours=x.hour, minutes=x.minute, seconds=x.second).total_seconds() if x else None)
-        cols = []
-        # if corte > 0:
-        #     df_pivot = df_pivot[(df_pivot[f'Dif_{label.lower()}'] < corte) & (df_pivot[f'Dif_{label.lower()}'] > 15)]
-        for c in df_pivot.columns:
-            if c in lista_productos:
-                cols.append(c)
-        df_pivot["#ProdVol"] = df_pivot[cols].sum(axis=1)
-        col = df_pivot.pop('#ProdVol')
-        df_pivot.insert(len(df_pivot.columns) - 3, '#ProdVol', col)
-        df_pivot.pop('mov_folio')
-        df_pivot = intervalo_hora(df_pivot, freq=freq, target=f'Dif_{label.lower()}')
-        dict_cols = dict_cols[f'col{label}']
-        if len(df_pivot.columns) != len(dict_cols):
-            print(
-                f'ERROR : columns modelo entrenado diferente al modelo generado.\nColumnas Obtenidas {len(df_pivot.columns)} esperadas {len(dict_cols)} ')
-            print(set(dict_cols) - set(df_pivot.columns.tolist()))
-            print(set(df_pivot.columns.tolist()) - set(dict_cols))
-        else:
-            df_pivot = df_pivot[dict_cols]
-    else:
-
-        df_melt = pd.melt(df_pasillo, id_vars=['Folio', 'Producto'], value_vars=['Total_PCK'],
-                          var_name="Pasillo").dropna(subset='value')
-        df_pivot = df_melt.pivot_table(index=['Folio', 'Pasillo'], columns='Producto', values='value').reset_index()
-        df_pivot = df_pivot.fillna(0)
-        col = df_pivot.columns.tolist()
-        # tiempos_pck["Fin_pck"] = pd.to_datetime(tiempos_pck["Fin_pck"])
-        # tiempos_pck["mov_hora_control"] = pd.to_datetime(tiempos_pck["mov_hora_control"])
-        # tiempos_pck['Fin_pck-mov_hora_control'] = abs(
-        #     tiempos_pck['Fin_pck'] - tiempos_pck['mov_hora_control']).dt.total_seconds()
-        # if corte > 0:
-        #     tiempos_pck = tiempos_pck[
-        #         (tiempos_pck['Fin_pck-mov_hora_control'] < corte) & (tiempos_pck['Fin_pck-mov_hora_control'] > 15)]
-        tiempos_pck["mov_llamado"] = pd.to_datetime(tiempos_pck["mov_llamado"])
-
-        tiempos_pck['hora'] = tiempos_pck['mov_llamado'].dt.hour
-        df_pivot = df_pivot.merge(tiempos_pck[['hora', 'mov_folio']], left_on='Folio',
-                                  right_on='mov_folio', how='left')
-        # .dropna(subset=['Fin_pck-mov_hora_control']))
-        for p in dict_cols[f'col_'][2:-14]:
-            if not p in col:
-                df_pivot[p] = 0
-        cols = []
-        for c in df_pivot.columns:
-            if c in lista_productos:
-                cols.append(c)
-        df_pivot["#ProdVol"] = df_pivot[cols].sum(axis=1)
-        col = df_pivot.pop('#ProdVol')
-        df_pivot.insert(len(df_pivot.columns) - 3, '#ProdVol', col)
-        df_pivot.pop('mov_folio')
-        df_pivot = intervalo_hora(df_pivot, freq=freq, target='Fin_pck-mov_hora_control')
-        dict_cols = dict_cols[f'col_']
-        if len(df_pivot.columns) != len(dict_cols):
-            print(
-                f'ERROR : columns modelo entrenado diferente al modelo generado.\nColumnas Obtenidas {len(df_pivot.columns)} esperadas {len(dict_cols)} ')
-            print(set(dict_cols) - set(df_pivot.columns.tolist()))
-            print(set(df_pivot.columns.tolist()) - set(dict_cols))
-        else:
-            df_pivot = df_pivot[dict_cols]
-    return df_pivot
 
 
 def filt_day(df, column, day):
@@ -358,7 +296,7 @@ def filt_day(df, column, day):
         Returns:
             DataFrame: El DataFrame filtrado por día.
         """
-    return df[(df[column] > day) & (df[column] <= day + timedelta(hours=23))].sort_values(by='mov_llamado')
+    return df[(df[column] > day) & (df[column] <= day + datetime.timedelta(hours=23))].sort_values(by='mov_llamado')
 
 
 def xgb_predict(df, model):
@@ -396,53 +334,38 @@ def prediction_time(mod, pasillo='A', p=None):
         df = p.dfA
         X = df[df.columns.tolist()[2:]]  # .drop(['Dif_a'], axis=1)  # Elimina la columna de tiemp
         y_pred = mod.predict(X)
-        return int(y_pred[0])
     elif pasillo == 'B':
         # mod = XGBRegressor()
         # mod.load_model('df/input/models/xgb_model_Dif_b.json')
         df = p.dfB
         X = df[df.columns.tolist()[2:]]  # .drop(['Dif_a'], axis=1)  # Elimina la columna de tiemp
         y_pred = mod.predict(X)
-        return int(y_pred[0])
+
     elif pasillo == 'C':
         # mod = XGBRegressor()
         # mod.load_model('df/input/models/xgb_model_Dif_c.json')
         df = p.dfC
         X = df[df.columns.tolist()[2:]]  # .drop(['Dif_a'], axis=1)  # Elimina la columna de tiemp
         y_pred = mod.predict(X)
-        return int(y_pred[0])
+
     elif pasillo == '_':
         # mod = XGBRegressor()
         # mod.load_model('df/input/models/xgb_model_Fin_pck-mov_hora_control.json')
         df = p.df_
         X = df[df.columns.tolist()[2:]]  # .drop(['Dif_a'], axis=1)  # Elimina la columna de tiemp
         y_pred = mod.predict(X)
-        return int(y_pred[0])
+    if int(y_pred[0]) < 1:
+        print(f'Modelo pred {X}')
+        print(int(y_pred[0]))
+    return int(y_pred[0])
 
 
-def creacion_pre_forecast(df_pasillos, row, prod_pass, dict_cols, lista_productos):
-    """
-        Realiza la preparación previa al pronóstico de creación.
-
-        Args:
-            df_pasillos (DataFrame): El DataFrame de pasillos.
-            row (DataFrame): Una fila del DataFrame.
-            prod_pass (list): La lista de productos en el pasillo.
-            dict_cols (dict): Un diccionario con información de columnas.
-            lista_productos (list): La lista de productos.
-
-        Returns:
-            tuple: Un tuple que contiene DataFrames para el pronóstico de creación.
-        """
-    dfA = df_simulacion_creacion('A', df_pasillos, row, lista_productos, freq=1, corte=0, prod_pass=prod_pass,
-                                 dict_cols=dict_cols)
-    dfB = df_simulacion_creacion('B', df_pasillos, row, lista_productos, freq=1, corte=0, prod_pass=prod_pass,
-                                 dict_cols=dict_cols)
-    dfC = df_simulacion_creacion('C', df_pasillos, row, lista_productos, freq=1, corte=0, prod_pass=prod_pass,
-                                 dict_cols=dict_cols)
-    df_ = df_simulacion_creacion('', df_pasillos, row, lista_productos, freq=1, corte=0, prod_pass=prod_pass,
-                                 dict_cols=dict_cols)
-    return dfA, dfB, dfC, df_
+def convertir_a_int(elemento):
+    if isinstance(elemento, pd.Series):
+        return elemento.iloc[0]
+    else:
+        #asumiendo que si no es series entonces si es int
+        return elemento
 
 
 def nuevo_pedido(i, df_dia, df_pasillo, prod_pass, dict_cols, lista_productos, mod_a, mod_b, mod_c, simulado=True,
@@ -467,7 +390,7 @@ def nuevo_pedido(i, df_dia, df_pasillo, prod_pass, dict_cols, lista_productos, m
     df_pasillos = df_pasillo[df_pasillo.Folio == row['mov_folio']]
     dict_results = get_real_info(row, resultado_bbdd)
     dfA, dfB, dfC, df_ = creacion_pre_forecast(df_pasillos, row.to_frame().T, prod_pass, dict_cols, lista_productos)
-    print('len dfs', len(dfA), len(dfB), len(dfC), len(df_))
+    #print('len dfs', len(dfA), len(dfB), len(dfC), len(df_))
     p = Pedido(folio=row['mov_folio'], doc=row['Doc'], hora_meson=row['HoraMeson'], hora_llamado=row['mov_llamado'],
                dfA=dfA, dfB=dfB, dfC=dfC, df_=df_)
 
@@ -488,14 +411,14 @@ def nuevo_pedido(i, df_dia, df_pasillo, prod_pass, dict_cols, lista_productos, m
     if simulado:
         p.REAL_pred_ini_pck = (row['Ini_pck'] - row['mov_llamado']).total_seconds()
         if not isinstance(row['Dif_a'], float):
-            p.REAL_predA = timedelta(hours=row['Dif_a'].hour, minutes=row['Dif_a'].minute,
-                                     seconds=row['Dif_a'].second).total_seconds()
+            p.REAL_predA = datetime.timedelta(hours=row['Dif_a'].hour, minutes=row['Dif_a'].minute,
+                                              seconds=row['Dif_a'].second).total_seconds()
         if not isinstance(row['Dif_b'], float):
-            p.REAL_predB = timedelta(hours=row['Dif_b'].hour, minutes=row['Dif_b'].minute,
-                                     seconds=row['Dif_b'].second).total_seconds()
+            p.REAL_predB = datetime.timedelta(hours=row['Dif_b'].hour, minutes=row['Dif_b'].minute,
+                                              seconds=row['Dif_b'].second).total_seconds()
         if not isinstance(row['Dif_c'], float):
-            p.REAL_predC = timedelta(hours=row['Dif_c'].hour, minutes=row['Dif_c'].minute,
-                                     seconds=row['Dif_c'].second).total_seconds()
+            p.REAL_predC = datetime.timedelta(hours=row['Dif_c'].hour, minutes=row['Dif_c'].minute,
+                                              seconds=row['Dif_c'].second).total_seconds()
             # print(p.REAL_predA,p.REAL_predB,p.REAL_predC)
 
         p.REAL_pred_max = max([p.REAL_predA, p.REAL_predB, p.REAL_predC])
@@ -533,32 +456,36 @@ def get_real_info(info, bbdd):
                    'hora_fin_pck': None, 'pred_': None, 'mov_entregado': None}
     bd = bbdd[bbdd.mov_folio == info['mov_folio']]
     for p_col, col in mapeo.items():
+
         try:
-            if pd.isnull(info[col]):
+            if (col is None) or (pd.isnull(info[col])):
                 # predict
                 if len(bd) > 0:
-
-                    dict_return[p_col] = bd[p_col]
+                    dict_return[p_col] = bd[p_col].iloc[0]
                 else:
                     # No está en bbdd
                     pass
+
             else:
-                if isinstance(info[col], datetime):
-                    dict_return[p_col] = bbdd[bbdd.mov_folio == info['mov_folio']][p_col]
-                else:
-                    dict_return[p_col] = info[col]
+                dict_return[p_col] = info[col]
+                #if isinstance(info[col], datetime.datetime):
+                #    if len(bd) > 0:
+                #        dict_return[p_col] = bd[p_col].iloc[0]
+
+                #else:
+                #dict_return[p_col] = info[col]
                 #  valor real
         except Exception as e:
             print(e)
             if len(bd) > 0:
-                dict_return[p_col] = bd[p_col]
-            # print(traceback.format_exc())
+                dict_return[p_col] = bd[p_col].iloc[0]
+            print(traceback.format_exc())
     return dict_return
 
 
 def time_to_seconds(x):
     if type(x) == datetime.time:
-        return timedelta(hours=x.hour, minutes=x.minute, seconds=x.second).total_seconds()
+        return datetime.timedelta(hours=x.hour, minutes=x.minute, seconds=x.second).total_seconds()
     else:
         return None
 
@@ -574,7 +501,7 @@ def generar_time(hora, seg):
         Returns:
             datetime: La nueva marca de tiempo generada.
         """
-    return hora + timedelta(seconds=seg)
+    return hora + datetime.timedelta(seconds=seg)
 
 
 def calcular_resultados(completados):
@@ -671,13 +598,315 @@ def calcular_resultados(completados):
         print(p)
         # var_dif.append(np.abs(pred_value - real_value)/real_value)
 
-# 1) Data sea un dia completo : LISTO FILTRO_DAY
-# 2) lista con el llamado de cada uno de los pedidos (EVentos llegada)
+def creacion_pre_forecast(df_pasillos, row, prod_pass, dict_cols, lista_productos, ajustar_modelos=False):
+    """
+        Realiza la preparación previa al pronóstico de creación.
 
-# 2.1) generar hora inicial . Ya está sorted del filt_day
-# 2.2) crear el objeto Pedido
-# 3) Ingreso de pedido y envio a los pasillos respectivos
-# 4) Ejecucion de forecast para dicho requerimiento
-# Para eso se debe crear el dfA,dfB, dfC
-# 5) Cambiar las horas de pred
-# 6) COrrer simulacion y cuando termina cada proceso cambiar las horas del objeto en cuestion.
+        Args:
+            df_pasillos (DataFrame): El DataFrame de pasillos.
+            row (DataFrame): Una fila del DataFrame.
+            prod_pass (list): La lista de productos en el pasillo.
+            dict_cols (dict): Un diccionario con información de columnas.
+            lista_productos (list): La lista de productos.
+
+        Returns:
+            tuple: Un tuple que contiene DataFrames para el pronóstico de creación.
+        """
+    dfA = df_simulacion_creacion('A', df_pasillos, row, lista_productos, freq=1, corte=0, prod_pass=prod_pass,
+                                 dict_cols=dict_cols, ajustar_modelos=ajustar_modelos)
+    dfB = df_simulacion_creacion('B', df_pasillos, row, lista_productos, freq=1, corte=0, prod_pass=prod_pass,
+                                 dict_cols=dict_cols, ajustar_modelos=ajustar_modelos)
+    dfC = df_simulacion_creacion('C', df_pasillos, row, lista_productos, freq=1, corte=0, prod_pass=prod_pass,
+                                 dict_cols=dict_cols, ajustar_modelos=ajustar_modelos)
+    df_ = df_simulacion_creacion('', df_pasillos, row, lista_productos, freq=1, corte=0, prod_pass=prod_pass,
+                                 dict_cols=dict_cols, ajustar_modelos=ajustar_modelos)
+    return dfA, dfB, dfC, df_
+
+def df_simulacion_creacion(label, df_pasillo, tiempos_pck, lista_productos, freq=1, corte=0, prod_pass=None,
+                           dict_cols=None, ajustar_modelos=False):
+    """
+        Crea un DataFrame para simulación de creación.
+
+        Args:
+            label (str): La etiqueta del pasillo.
+            df_pasillo (DataFrame): El DataFrame de pasillos.
+            tiempos_pck (DataFrame): El DataFrame de tiempos de paquete.
+            lista_productos (list): La lista de productos.
+            freq (int): La frecuencia de los intervalos de hora.
+            corte (int): El valor de corte para los datos.
+            prod_pass (list): La lista de productos en el pasillo.
+            dict_cols (dict): Un diccionario con información de columnas.
+
+        Returns:
+            DataFrame: El DataFrame creado para simulación de creación.
+        """
+    if ajustar_modelos:
+        if label != "":
+            df_melt = pd.melt(df_pasillo[df_pasillo[f'Pasillo_{label}'] > 0],
+                              id_vars=['Folio', 'Producto'], value_vars=[f'Pasillo_{label}'], var_name="Pasillo").dropna(
+                subset='value')
+            if len(df_melt) == 0:
+                return []
+            df_pivot = df_melt.pivot_table(index=['Folio', 'Pasillo'], columns='Producto', values='value').reset_index()
+            df_pivot = df_pivot.fillna(0)
+            df_pivot['#prod'] = df_pivot.drop(['Folio', "Pasillo"], axis=1).apply(contar_productos_mayores_que_cero, axis=1)
+
+            df_pivot = df_pivot.merge(tiempos_pck[['mov_llamado', 'mov_folio']], left_on='Folio',
+                                      right_on='mov_folio', how='left')
+            # .dropna(subset=[f'Dif_{label.lower()}']))
+            df_pivot["mov_llamado"] = pd.to_datetime(df_pivot["mov_llamado"])
+            df_pivot['hora'] = df_pivot['mov_llamado'].dt.hour
+            col = df_pivot.pop('hora')
+            df_pivot.insert(len(df_pivot.columns) - 3, 'hora', col)
+            df_pivot.pop('mov_llamado')
+            cols = [c for c in df_pivot.columns if c in lista_productos]
+            df_pivot["#ProdVol"] = df_pivot[cols].sum(axis=1)
+            col = df_pivot.pop('#ProdVol')
+            df_pivot.insert(len(df_pivot.columns) - 3, '#ProdVol', col)
+            df_pivot.pop('mov_folio')
+            df_pivot = intervalo_hora(df_pivot, freq=freq, target=f'Dif_{label.lower()}')
+
+        else:
+
+            df_melt = pd.melt(df_pasillo, id_vars=['Folio', 'Producto'], value_vars=['Total_PCK'],
+                              var_name="Pasillo").dropna(subset='value')
+            df_pivot = df_melt.pivot_table(index=['Folio', 'Pasillo'], columns='Producto', values='value').reset_index()
+            df_pivot = df_pivot.fillna(0)
+            tiempos_pck["mov_llamado"] = pd.to_datetime(tiempos_pck["mov_llamado"])
+
+            tiempos_pck['hora'] = tiempos_pck['mov_llamado'].dt.hour
+            df_pivot = df_pivot.merge(tiempos_pck[['hora', 'mov_folio']], left_on='Folio',
+                                      right_on='mov_folio', how='left')
+            # .dropna(subset=['Fin_pck-mov_hora_control']))
+            # for p in dict_cols[f'col_'][2:-14]:
+            #     if not p in col:
+            #         df_pivot[p] = 0
+            # cols = []
+            # for c in df_pivot.columns:
+            #     if c in lista_productos:
+            #         cols.append(c)
+            # reemplazar con isnumeric
+            cols = [c for c in df_pivot.columns if c in lista_productos]
+            df_pivot["#ProdVol"] = df_pivot[cols].sum(axis=1)
+            col = df_pivot.pop('#ProdVol')
+            df_pivot.insert(len(df_pivot.columns) - 3, '#ProdVol', col)
+            df_pivot.pop('mov_folio')
+            df_pivot = intervalo_hora(df_pivot, freq=freq, target='Fin_pck-mov_hora_control')
+
+            # dict_cols = dict_cols[f'col_']
+            # if len(df_pivot.columns) != len(dict_cols):
+            #     print(
+            #         f'ERROR : columns modelo entrenado diferente al modelo generado.\nColumnas Obtenidas {len(df_pivot.columns)} esperadas {len(dict_cols)} ')
+            #     print(set(dict_cols) - set(df_pivot.columns.tolist()))
+            #     print(set(df_pivot.columns.tolist()) - set(dict_cols))
+            # else:
+            #     df_pivot = df_pivot[dict_cols]
+    else:
+        if label != "":
+            if not prod_pass:
+                prod_pass = list(df_pasillo.dropna(subset=f'Pasillo_{label}').Producto.unique())
+            else:
+                prod_pass = prod_pass[label]
+            # print(f'Pasillo {label} tiene {len(prod_pass)} productos.')
+            df_melt = pd.melt(df_pasillo[df_pasillo['Producto'].isin(dict_cols[f'col{label}'][2:-16])],
+                              id_vars=['Folio', 'Producto'], value_vars=[f'Pasillo_{label}'], var_name="Pasillo").dropna(
+                subset='value')
+            if len(df_melt) == 0:
+                return []
+            df_pivot = df_melt.pivot_table(index=['Folio', 'Pasillo'], columns='Producto', values='value').reset_index()
+            df_pivot = df_pivot.fillna(0)
+            col = df_pivot.columns.tolist()
+            for p in dict_cols[f'col{label}'][2:-15]:
+                if not p in col:
+                    df_pivot[p] = 0
+            # for p in prod_pass:
+            #    if not p in col:
+            #        df_pivot[p] = 0
+            df_pivot['#prod'] = df_pivot.drop(['Folio', "Pasillo"], axis=1).apply(contar_productos_mayores_que_cero, axis=1)
+
+            df_pivot = df_pivot.merge(tiempos_pck[['mov_llamado', 'mov_folio']], left_on='Folio',
+                                      right_on='mov_folio', how='left')
+            # .dropna(subset=[f'Dif_{label.lower()}']))
+            df_pivot["mov_llamado"] = pd.to_datetime(df_pivot["mov_llamado"])
+            df_pivot['hora'] = df_pivot['mov_llamado'].dt.hour
+            col = df_pivot.pop('hora')
+            df_pivot.insert(len(df_pivot.columns) - 3, 'hora', col)
+            df_pivot.pop('mov_llamado')
+            # df_pivot[f'Dif_{label.lower()}'] = df_pivot[f'Dif_{label.lower()}'].apply(
+            #     lambda x: timedelta(hours=x.hour, minutes=x.minute, seconds=x.second).total_seconds() if x else None)
+            cols = []
+            # if corte > 0:
+            #     df_pivot = df_pivot[(df_pivot[f'Dif_{label.lower()}'] < corte) & (df_pivot[f'Dif_{label.lower()}'] > 15)]
+            for c in df_pivot.columns:
+                if c in lista_productos:
+                    cols.append(c)
+            df_pivot["#ProdVol"] = df_pivot[cols].sum(axis=1)
+            col = df_pivot.pop('#ProdVol')
+            df_pivot.insert(len(df_pivot.columns) - 3, '#ProdVol', col)
+            df_pivot.pop('mov_folio')
+            df_pivot = intervalo_hora(df_pivot, freq=freq, target=f'Dif_{label.lower()}')
+            dict_cols = dict_cols[f'col{label}']
+            if len(df_pivot.columns) != len(dict_cols):
+                print(
+                    f'ERROR : columns modelo entrenado diferente al modelo generado.\nColumnas Obtenidas {len(df_pivot.columns)} esperadas {len(dict_cols)} ')
+                print(set(dict_cols) - set(df_pivot.columns.tolist()))
+                print(set(df_pivot.columns.tolist()) - set(dict_cols))
+            else:
+                df_pivot = df_pivot[dict_cols]
+        else:
+
+            df_melt = pd.melt(df_pasillo, id_vars=['Folio', 'Producto'], value_vars=['Total_PCK'],
+                              var_name="Pasillo").dropna(subset='value')
+            df_pivot = df_melt.pivot_table(index=['Folio', 'Pasillo'], columns='Producto', values='value').reset_index()
+            df_pivot = df_pivot.fillna(0)
+            col = df_pivot.columns.tolist()
+            # tiempos_pck["Fin_pck"] = pd.to_datetime(tiempos_pck["Fin_pck"])
+            # tiempos_pck["mov_hora_control"] = pd.to_datetime(tiempos_pck["mov_hora_control"])
+            # tiempos_pck['Fin_pck-mov_hora_control'] = abs(
+            #     tiempos_pck['Fin_pck'] - tiempos_pck['mov_hora_control']).dt.total_seconds()
+            # if corte > 0:
+            #     tiempos_pck = tiempos_pck[
+            #         (tiempos_pck['Fin_pck-mov_hora_control'] < corte) & (tiempos_pck['Fin_pck-mov_hora_control'] > 15)]
+            tiempos_pck["mov_llamado"] = pd.to_datetime(tiempos_pck["mov_llamado"])
+
+            tiempos_pck['hora'] = tiempos_pck['mov_llamado'].dt.hour
+            df_pivot = df_pivot.merge(tiempos_pck[['hora', 'mov_folio']], left_on='Folio',
+                                      right_on='mov_folio', how='left')
+            # .dropna(subset=['Fin_pck-mov_hora_control']))
+            for p in dict_cols[f'col_'][2:-14]:
+                if not p in col:
+                    df_pivot[p] = 0
+            cols = []
+            for c in df_pivot.columns:
+                if c in lista_productos:
+                    cols.append(c)
+            df_pivot["#ProdVol"] = df_pivot[cols].sum(axis=1)
+            col = df_pivot.pop('#ProdVol')
+            df_pivot.insert(len(df_pivot.columns) - 3, '#ProdVol', col)
+            df_pivot.pop('mov_folio')
+            df_pivot = intervalo_hora(df_pivot, freq=freq, target='Fin_pck-mov_hora_control')
+            dict_cols = dict_cols[f'col_']
+            if len(df_pivot.columns) != len(dict_cols):
+                print(
+                    f'ERROR : columns modelo entrenado diferente al modelo generado.\nColumnas Obtenidas {len(df_pivot.columns)} esperadas {len(dict_cols)} ')
+                print(set(dict_cols) - set(df_pivot.columns.tolist()))
+                print(set(df_pivot.columns.tolist()) - set(dict_cols))
+            else:
+                df_pivot = df_pivot[dict_cols]
+    return df_pivot
+
+def actualizar_modelos_pck():
+
+    database_url = get_database_url(resultados=True)
+    engine = create_engine(database_url)
+    df_pasillo = pd.read_sql('select * from pasillo_historico', engine)
+    tiempos_pck = pd.read_sql('select * from tiempos_pck_historico', engine)
+    prod_vol = cargar_productos_voluminosos()
+
+
+    # Esto por la info de panal.
+    database_url = get_database_url(resultados=False)
+    engine = create_engine(database_url)
+
+    tiempos_pck2 = fetch_data_from_view('vw_pck_docs', engine,
+                                       query='SELECT * FROM vw_pck_docs WHERE mov_entregado IS NOT NULL AND DATE(mov_llamado) = CURRENT_DATE')
+
+    folios_relevantes = tiempos_pck2.mov_folio.unique()
+    folios_relevantes = ','.join([f"'{folio}'" for folio in folios_relevantes])
+
+    df_pasillo2 = fetch_data_from_view('vw_pck_pas_docs', engine,
+                                       query=f'SELECT * FROM vw_pck_pas_docs WHERE Folio IN ({folios_relevantes})')
+    tiempos_pck2["mov_llamado"] = pd.to_datetime(tiempos_pck2["mov_llamado"])
+    tiempos_pck2 = tiempos_pck2.dropna(subset="mov_llamado")
+
+    # <editor-fold desc="SOlo FOlios con toda la info">
+    folios = set(tiempos_pck2.mov_folio.unique()).intersection(set(df_pasillo2.Folio.unique()))
+
+    tiempos_pck2 = tiempos_pck2[tiempos_pck2.mov_folio.isin(folios)]
+    df_pasillo2 = df_pasillo2[df_pasillo2.Folio.isin(folios)]
+    # </editor-fold>
+
+    tiempos_pck = pd.concat([tiempos_pck, tiempos_pck2]).drop_duplicates(subset=['mov_folio', 'mov_llamado'])
+    df_pasillo = pd.concat([df_pasillo, df_pasillo2])
+
+    lista_productos = prod_vol['Cod. Producto'].unique().tolist()
+
+    # <editor-fold desc="Creacion dfs">
+    dfA, dfB, dfC, df_ = creacion_pre_forecast(df_pasillo, tiempos_pck, prod_pass=None, dict_cols=None,
+                                               lista_productos=lista_productos, ajustar_modelos=True)
+
+    dfA = dfA.merge(tiempos_pck[['mov_folio', 'Dif_a']], left_on='Folio', right_on='mov_folio', how='left').drop(
+        'mov_folio', axis=1)
+    dfA = dfA[~dfA.Dif_a.isna()]
+    dfB = dfB.merge(tiempos_pck[['mov_folio', 'Dif_b']], left_on='Folio', right_on='mov_folio', how='left').drop(
+        'mov_folio', axis=1)
+    dfB = dfB[~dfB.Dif_b.isna()]
+    dfC = dfC.merge(tiempos_pck[['mov_folio', 'Dif_c']], left_on='Folio', right_on='mov_folio', how='left').drop(
+        'mov_folio', axis=1)
+    dfC = dfC[~dfC.Dif_c.isna()]
+
+    dfA[f'Dif_a'] = dfA[f'Dif_a'].apply(
+        lambda x: timedelta(hours=x.hour, minutes=x.minute, seconds=x.second).total_seconds() if x else None)
+    dfB[f'Dif_b'] = dfB[f'Dif_b'].apply(
+        lambda x: timedelta(hours=x.hour, minutes=x.minute, seconds=x.second).total_seconds() if x else None)
+    dfC[f'Dif_c'] = dfC[f'Dif_c'].apply(
+        lambda x: timedelta(hours=x.hour, minutes=x.minute, seconds=x.second).total_seconds() if x else None)
+    # </editor-fold>
+
+    # <editor-fold desc="guardado_ dict to json">
+    todos_productos = df_pasillo.Producto.unique().tolist()
+
+    dict_cols_new = {'colA': dfA.columns.tolist(), 'colB': dfB.columns.tolist(), 'colC': dfC.columns.tolist(),
+                     'col_': df_.columns.tolist()}
+    prod_pass_new = {'A': [c for c in dfA.columns.tolist() if c in todos_productos],
+                     'B': [c for c in dfB.columns.tolist() if c in todos_productos],
+                     'C': [c for c in dfC.columns.tolist() if c in todos_productos]}
+    with open("df/input/models/colsDF.json", "w") as outfile:
+        json.dump(dict_cols_new, outfile)
+    with open("df/input/models/productos_pasillos.json", "w") as outfile:
+        json.dump(prod_pass_new, outfile)
+    # </editor-fold>
+
+    labels = ['Dif_a', 'Dif_b', 'Dif_c']
+
+    for label in labels:
+        if 'Dif_a' == label:
+            df_ = dfA[(dfA.Dif_a > 5)]
+        elif 'Dif_b' == label:
+            df_ = dfB[(dfB.Dif_b > 5)]
+        else:
+            df_ = dfC[(dfC.Dif_c > 10)]
+        y = df_[label]
+        X = df_[df_.columns.tolist()[2:-1]]  # .drop(['Dif_a'], axis=1)  # Elimina la columna de tiempo
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=42)
+        model = xgb.XGBRegressor(objective='reg:squarederror')
+        param_grid = {
+            'n_estimators': [100, 200, 300],
+            'max_depth': [3, 4, 5, 6],
+            'learning_rate': [0.01, 0.05, 0.1],
+            'subsample': [0.7, 0.8, 0.9, 1.0],
+            'colsample_bytree': [0.7, 0.8, 0.9, 1.0],
+            'gamma': [0, 0.1, 0.2, 0.3],
+            'min_child_weight': [1, 3, 5]
+        }
+        grid_search = RandomizedSearchCV(
+            estimator=model,
+            param_distributions=param_grid,
+            n_iter=200,  # Number of parameter settings sampled
+            scoring='neg_mean_squared_error',  # For regression
+            cv=3,  # Number of folds in cross-validation
+            verbose=1,
+            n_jobs=-1,  # Use all available cores
+            random_state=42
+        )
+        grid_search.fit(X_train, y_train)
+        print("Best parameters found: ", grid_search.best_params_)
+        print("Best RMSE: ", (-grid_search.best_score_) ** 0.5)
+
+        best_model = grid_search.best_estimator_
+        y_pred = best_model.predict(X_test)
+        rmse = mean_squared_error(y_test, y_pred, squared=False)
+        mae = mean_absolute_error(y_test, y_pred)
+        print("Test set RMSE: ", rmse)
+        print("Test set mae: ", mae)
+        best_model.save_model(f"df/input/models/best_xgboost_model_{label}.json")

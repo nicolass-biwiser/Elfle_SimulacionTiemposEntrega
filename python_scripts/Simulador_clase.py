@@ -200,7 +200,7 @@ class Simulador:
                 - posicion_min_tiempo: Posición del evento con el tiempo mínimo.
                 - tupla_menor_tiempo: Tupla que contiene la información del próximo evento.
                 """
-
+        #print(f'PROXIMO EVENTO {self.eventos}')
         posicion_min_tiempo = min(range(len(self.eventos)), key=lambda i: self.eventos[i][1])
         tupla_menor_tiempo = self.eventos.pop(posicion_min_tiempo)
         return posicion_min_tiempo, tupla_menor_tiempo
@@ -352,10 +352,10 @@ class Simulador:
                              resultado_bbdd=self.resultado_bbdd)
             delta_time = p.hora_ini_pck - self.hora_inicio
             one_second = np.timedelta64(1000000000, 'ns')
-            seconds = delta_time / one_second
+            seconds = convertir_a_int(delta_time / one_second)
             # NO TODOS SON LLEGA_PEDIDO
-            print(p)
             self.eventos.append(('llega_pedido', seconds, p))
+        print(f'Se añadieron {len(self.eventos)} en un inicio')
         print('Eventos llegada finalizado')
 
     def run(self):
@@ -374,6 +374,7 @@ class Simulador:
         t1 = time.time()
         print(f'Tiempo transcurrido en add_evento_llegada {round(t1 - t0, 2)}')
         # print(f'Pedidos completados {len(self.completados)}/{len(self.df_dia)}')
+        cant_pedidos = len(self.df_dia)
         print(f'Pedidos completados {len(self.completados)}/{len(self.df_dia)}')
         while continuar:
 
@@ -381,8 +382,11 @@ class Simulador:
             # EN ESTAS PRUEBAS CONVIENE PONER TODOS LOS PEDIDOS POR LLEGAR INICIALMENTE A EVENTO
             # escojo nuevo evento
             if len(self.eventos) > 0:
+                for e in self.eventos:
+                    if not (isinstance(e[1],int) or isinstance(e[1],float)):
+                        print(e[0], e[1])
                 pos, tupla = self.proximo_evento()
-                print(f'TIEMPO ACTUAL {self.tiempo} --> PROXIMO EVENTO {tupla[1]} - {tupla[0]}')
+                print(f'TIEMPO ACTUAL {self.tiempo} --> PROXIMO EVENTO {tupla[2].folio} {tupla[1]} - {tupla[0]}')
                 # acciono evento y cambios relacionados
                 self.tiempo = tupla[1]
                 self.accion(tupla)
@@ -390,6 +394,8 @@ class Simulador:
 
                 # finalizo while?
             else:
+                print('here continuar false ')
+                print(f'Pedidos completados {len(self.completados)}/{len(self.df_dia)}')
                 continuar = False
 
     def crosscheck(self):
@@ -411,5 +417,3 @@ class Simulador:
                 print(f'[ERROR] Pedido {p.folio}: hora_fin_pckB {p.hora_fin_pckB} v/s hora_ini_pckB {p.hora_ini_pckB} ')
             if p.hora_ini_pckC and not (p.hora_fin_pckC > p.hora_ini_pckC):
                 print(f'[ERROR] Pedido {p.folio}: hora_fin_pckC {p.hora_fin_pckC} v/s hora_ini_pckC {p.hora_ini_pckC} ')
-
-

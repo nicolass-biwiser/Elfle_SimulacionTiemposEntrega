@@ -47,3 +47,19 @@ if test2:
         print(f'Diferencia columnas {cols_esperadas - cols_recibidas}')
     if len(cols_recibidas - cols_esperadas) > 0:
         print(f'Recibo más columnas {cols_recibidas - cols_esperadas}')
+
+
+df_pasillo, tiempos_pck, prod_vol = cargar_informacion(True)
+df_pasillo2 = pd.read_excel("df/input/tiempo_operaciones (9).xlsx", sheet_name="cantidades_picking")
+tiempos_pck2 = pd.read_excel("df/input/tiempo_operaciones (9).xlsx", sheet_name="detalle_tiempos")
+tiempos_pck2["mov_llamado"] = pd.to_datetime(tiempos_pck2["mov_llamado"])
+tiempos_pck2 = tiempos_pck2.dropna(subset="mov_llamado")
+folios = set(tiempos_pck2.mov_folio.unique()).intersection(set(df_pasillo2.Folio.unique()))
+tiempos_pck2 = tiempos_pck2[tiempos_pck2.mov_folio.isin(folios)]
+df_pasillo2 = df_pasillo2[df_pasillo2.Folio.isin(folios)]
+tiempos_pck = pd.concat([tiempos_pck, tiempos_pck2]).drop_duplicates(subset=['mov_folio','mov_llamado'])
+df_pasillo = pd.concat([df_pasillo, df_pasillo2])
+database_url = get_database_url(resultados=True)
+engine = create_engine(database_url)
+df_pasillo.to_sql('pasillo_historico', engine)
+tiempos_pck.to_sql('tiempos_pck_historico', engine)
