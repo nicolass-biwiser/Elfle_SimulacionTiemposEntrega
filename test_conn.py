@@ -9,6 +9,9 @@ test1 = False
 test2 = False
 test3 = False
 test4 = False
+test5= False
+test6 = False
+test7 = True
 #df_pasillo, tiempos_pck, prod_vol = cargar_informacion(True)
 # TEST CONEXION BBDD ELFLE + GUARDADO
 if test0:
@@ -91,5 +94,29 @@ if test4:
     engine = create_engine(database_url)
     df_pasillo = df_pasillo.drop(columns='prod_voluminoso')
     tiempos_pck = tiempos_pck[tiempos_pck2.columns.tolist()]
+
+
+    def time_to_timedelta(t):
+        if t is None:
+            return pd.NaT
+        return timedelta(hours=t.hour, minutes=t.minute, seconds=t.second)
+    #df_pasillo.to_sql('pasillo_historico', engine, index=False, if_exists='replace')
+    #tiempos_pck.to_sql('tiempos_pck_historico', engine, index=False, if_exists='replace')
+if test5:
+    actualizar_modelos_pck()
+if test6:
+    database_url = get_database_url(resultados=True)
+    engine = create_engine(database_url)
+    df_pasillo = pd.read_sql('select * from pasillo_historico', engine)
+    tiempos_pck = pd.read_sql('select * from tiempos_pck_historico', engine)
+    df_pasillo = df_pasillo.drop_duplicates()
+    tiempos_pck = tiempos_pck.drop_duplicates()
     df_pasillo.to_sql('pasillo_historico', engine, index=False, if_exists='replace')
-    tiempos_pck.to_sql('tiempos_pck_historico', engine, index=False, if_exists='replace')
+    tiempos_pck.to_sql("tiempos_pck_historico", engine, index=False, if_exists='replace')
+if test7:
+    #sacar duplicados
+    database_url = get_database_url(resultados=True)
+    engine = create_engine(database_url)
+    df = pd.read_sql('select * from prediccion_pck', engine)
+    df = df.drop_duplicates(subset=['Doc','mov_folio','mov_llamado'])
+    df.to_sql('prediccion_pck', engine, index=False, if_exists='replace')
