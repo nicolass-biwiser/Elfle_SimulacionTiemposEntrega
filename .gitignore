@@ -4,3 +4,10 @@
 /.ipynb_checkpoints
 /df/input/_old
 /df/output/_old
+Actualizar_modelos.ipynb
+df_pasillos_test.py
+df/input/analisis_productos_repetidos_pasillos biwiser.xlsx
+df/input/analisis_productos_repetidos_pasillos.xlsx
+df/input/models/productos_pasillos2_revisar.json
+df/input/tiempo_operaciones (9).xlsx
+python_scripts/__pycache__
