@@ -15,11 +15,20 @@ simplefilter(action="ignore", category=pd.errors.PerformanceWarning)
 
 
 def cargar_modelos():
+    """
+    Carga los modelos XGBoost pre-entrenados para las diferentes etapas del proceso.
+    
+    Returns:
+        tuple: Una tupla que contiene cuatro modelos XGBoost:
+            - mod_a: Modelo para la etapa A
+            - mod_b: Modelo para la etapa B
+            - mod_c: Modelo para la etapa C
+            - mod_: Modelo para el tiempo final de picking
+    """
     mod_a = XGBRegressor()
     mod_a.load_model('df/input/models/best_xgboost_model_Dif_a.json')
 
     mod_b = XGBRegressor()
-
     mod_b.load_model('df/input/models/best_xgboost_model_Dif_b.json')
 
     mod_c = XGBRegressor()
@@ -31,50 +40,62 @@ def cargar_modelos():
 
 
 def cargar_productos_voluminosos():
+    """
+    Carga el archivo de productos voluminosos desde un archivo Excel.
+    
+    Returns:
+        pandas.DataFrame: DataFrame que contiene la información de productos voluminosos
+    """
     return pd.read_excel('df/input/prod_voluminosos.xlsx')
 
 
 def get_database_url(resultados=True):
-    # Definir las credenciales y el URL de conexión
+    """
+    Genera la URL de conexión a la base de datos según el entorno especificado.
+    
+    Args:
+        resultados (bool, optional): Si es True, usa credenciales para la base de datos de resultados.
+                                   Si es False, usa credenciales para la base de datos de producción.
+                                   Por defecto es True.
+    
+    Returns:
+        str: URL de conexión a la base de datos formateada según el motor de base de datos
+    """
     if resultados:
         username = 'biwiser'
         password = 'bw2024Elfle'
         hostname = 'elfle-srv09.elfle.local'
         database = 'BIWISER'
-
-        # Construir la URL de conexión
         database_url = f"mssql+pyodbc://{username}:{password}@{hostname}/{database}?driver=ODBC+Driver+17+for+SQL+Server"
-
-
     else:
-        # Definir las credenciales y el URL de conexión
         username = 'usrview'
         password = 'EkwU96YRyDKJdr8'
         hostname = '192.168.1.8'
         database = 'panal_wms'
-
-        # Construir la URL de conexión
         database_url = f"mysql+mysqlconnector://{username}:{password}@{hostname}/{database}"
     return database_url
 
 
 def fetch_data_from_view(view_name, engine, query=None):
+    """
+    Ejecuta una consulta SQL en una vista o tabla de la base de datos.
+    
+    Args:
+        view_name (str): Nombre de la vista o tabla de la que se obtendrán los datos
+        engine: Objeto de conexión a la base de datos SQLAlchemy
+        query (str, optional): Consulta SQL personalizada. Si no se proporciona,
+                             se usará 'SELECT * FROM view_name'. Por defecto es None.
+    
+    Returns:
+        pandas.DataFrame: DataFrame con los resultados de la consulta, o None si ocurre un error
+    """
     try:
-        # Obtener la URL de conexión
-        # database_url = get_database_url(resultados=False)
-        #
-        # # Crear el motor de conexión
-        # engine = create_engine(database_url)
-
-        # Definir la consulta
         if query:
             df = pd.read_sql(query, engine)
         else:
             query = f"SELECT * FROM {view_name}"
             df = pd.read_sql(query, engine)
-
         return df
-
     except Exception as e:
         print(f"Error al traer los datos de la vista {view_name}: {e}")
         return None
@@ -195,6 +216,17 @@ def cargar_informacion(sim):
 
 
 def fin_pck_alcanzado(row_dia, pasillos):
+    """
+    Determina si se ha alcanzado el tiempo final de picking para un pedido en todos los pasillos utilizados.
+    
+    Args:
+        row_dia (pandas.Series): Fila del DataFrame con los tiempos de los pasillos.
+        pasillos (pandas.DataFrame): DataFrame con la información de los pasillos utilizados.
+    
+    Returns:
+        datetime or None: La máxima fecha de finalización si todos los pasillos han terminado,
+                        None en caso contrario o si no hay pasillos.
+    """
     pasillos_utilizados = []
     finalizado = True
     if len(pasillos) > 0:
@@ -371,7 +403,7 @@ def convertir_a_int(elemento):
 
 
 def nuevo_pedido(i, df_dia, df_pasillo, prod_pass, dict_cols, lista_productos, mod_a, mod_b, mod_c, simulado=True,
-                 resultado_bbdd=None):
+                 resultado_bbdd=None, productos_pasillos_arreglado=None):
     """
         Crea un nuevo objeto Pedido.
 
@@ -392,10 +424,16 @@ def nuevo_pedido(i, df_dia, df_pasillo, prod_pass, dict_cols, lista_productos, m
     df_pasillos = df_pasillo[df_pasillo.Folio == row['mov_folio']]
     dict_results = get_real_info(row, resultado_bbdd)
     dfA, dfB, dfC, df_ = creacion_pre_forecast(df_pasillos, row.to_frame().T, prod_pass, dict_cols, lista_productos)
-    #print('len dfs', len(dfA), len(dfB), len(dfC), len(df_))
+    productos = df_pasillos.Producto.tolist()
+    if not any(prod in productos_pasillos_arreglado['A'] for prod in productos):
+        dfA = pd.DataFrame()
+    if not any(prod in productos_pasillos_arreglado['B'] for prod in productos):
+        dfB = pd.DataFrame()
+    if not any(prod in productos_pasillos_arreglado['C'] for prod in productos):
+        dfC = pd.DataFrame()
+
     p = Pedido(folio=row['mov_folio'], doc=row['Doc'], hora_meson=row['HoraMeson'], hora_llamado=row['mov_llamado'],
                dfA=dfA, dfB=dfB, dfC=dfC, df_=df_)
-
     if len(resultado_bbdd[resultado_bbdd.mov_folio == row['mov_folio']]) > 0:
         for key, value in dict_results.items():
             setattr(p, key, value)
@@ -403,6 +441,7 @@ def nuevo_pedido(i, df_dia, df_pasillo, prod_pass, dict_cols, lista_productos, m
         p.pred_ini_pck = int(np.random.triangular(5, 12, 40))
         p.hora_ini_pck = generar_time(p.hora_llamado, p.pred_ini_pck)
         p.pred_ = int(np.random.triangular(20, 250, 500))
+        
         if len(p.dfA) > 0:
             p.predA = prediction_time(mod_a, 'A', p)
         if len(p.dfB) > 0:
@@ -824,6 +863,7 @@ def actualizar_modelos_pck():
     print('Iniciando Actualizar Modelo PCK')
     database_url = get_database_url(resultados=True)
     engine = create_engine(database_url)
+
     df_pasillo = pd.read_sql('select * from pasillo_historico', engine)
     tiempos_pck = pd.read_sql('select * from tiempos_pck_historico', engine)
     prod_vol = cargar_productos_voluminosos()
@@ -1080,3 +1120,56 @@ def test_actualizar_modelos_pck():
         print("Test set RMSE: ", rmse)
         print("Test set mae: ", mae)
         best_model.save_model(f"df/input/models/best_xgboost_model_{label}.json")
+
+
+def producto_pasillo_ultimo():
+    database_url = get_database_url(resultados=True)
+    engine = create_engine(database_url)
+    
+    df_pasillo = pd.read_sql('select Folio, Producto, Pasillo_A, Pasillo_B, Pasillo_C from pasillo_historico limit 15000', engine)
+    tiempos_pck = pd.read_sql('select mov_folio, mov_fecha from tiempos_pck_historico limit 15000', engine)
+
+    #folios = set(tiempos_pck.mov_folio.unique()).intersection(set(df_pasillo.Folio.unique()))
+    df_pasillo = df_pasillo.merge(tiempos_pck[['mov_folio', 'mov_fecha']], left_on='Folio', right_on='mov_folio', how='left')
+    # Obtener índices de la fila con la última fecha por producto
+    df_pasillo['mov_fecha'] = pd.to_datetime(df_pasillo['mov_fecha'])
+    idx = df_pasillo.groupby("Producto")["mov_fecha"].idxmax()
+    # Seleccionar las filas correspondientes
+    df_ultima = df_pasillo.loc[idx].reset_index(drop=True)
+    df_ultima["Pasillo"] = df_ultima[["Pasillo_A", "Pasillo_B", "Pasillo_C"]].idxmax(axis=1)
+    df_ultima = df_ultima[['Producto','Pasillo']]
+    prod_pass = cargar_productos_pasillos()
+    A = set(prod_pass['A'])
+    B = set(prod_pass['B'])
+    C = set(prod_pass['C'])
+    AB = A.intersection(B)
+    AC = A.intersection(C)
+    BC = B.intersection(C)
+    prod_problemas_repeticion = AB|AC|BC
+    for p in prod_problemas_repeticion:
+        ultima_aparicion_prod_p = df_ultima[df_ultima.Producto == p]
+        if len(ultima_aparicion_prod_p) == 1:
+            if ultima_aparicion_prod_p.Pasillo.values[0] == 'A':
+                print(f'Arreglando {p}, pertenece a A')
+                if p in prod_pass['B']:
+                    prod_pass['B'].remove(p)
+                if p in prod_pass['C']:
+                    prod_pass['C'].remove(p)
+            elif ultima_aparicion_prod_p.Pasillo.values[0] == 'B':
+                print(f'Arreglando {p}, pertenece a B')
+                if p in prod_pass['A']:
+                    prod_pass['A'].remove(p)
+                if p in prod_pass['C']:
+                    prod_pass['C'].remove(p)
+            else:
+                print(f'Arreglando {p}, pertenece a C')
+                if p in prod_pass['A']:
+                    prod_pass['A'].remove(p)
+                if p in prod_pass['B']:
+                    prod_pass['B'].remove(p)
+    return prod_pass
+            
+    
+    
+    
+    

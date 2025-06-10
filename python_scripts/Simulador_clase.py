@@ -1,41 +1,98 @@
+from __future__ import annotations
+from dataclasses import dataclass, field
 import numpy as np
 import random
-from collections import deque
-from python_scripts.functions import *
 import time
+from collections import deque
+from typing import Any, Dict, List, Optional, Tuple, Union, Deque, TypeVar, Generic, Type
+from datetime import datetime
+import pandas as pd
+import random
+
+# Import local functions
+from python_scripts.functions import (
+    convertir_a_int, generar_time, nuevo_pedido
+)
+
+# Set random seed for reproducibility
 random.seed(42)
 
+# Type aliases
+T = TypeVar('T')
+DataFrame = pd.DataFrame
+
+@dataclass
+class Pedido:
+    """Data class representing an order in the warehouse system."""
+    folio: str
+    dfA: DataFrame = field(default_factory=pd.DataFrame)
+    dfB: DataFrame = field(default_factory=pd.DataFrame)
+    dfC: DataFrame = field(default_factory=pd.DataFrame)
+    predA: float = 0.0
+    predB: float = 0.0
+    predC: float = 0.0
+    pred_: float = 0.0
+    hora_ini_pck: Optional[datetime] = None
+    hora_fin_pck: Optional[datetime] = None
+    hora_ini_pckA: Optional[datetime] = None
+    hora_fin_pckA: Optional[datetime] = None
+    hora_ini_pckB: Optional[datetime] = None
+    hora_fin_pckB: Optional[datetime] = None
+    hora_ini_pckC: Optional[datetime] = None
+    hora_fin_pckC: Optional[datetime] = None
+    hora_ini_revision: Optional[datetime] = None
+    hora_fin_revision: Optional[datetime] = None
+    mov_entregado: Optional[datetime] = None
+    fin_pasA: bool = False
+    fin_pasB: bool = False
+    fin_pasC: bool = False
+    
+    def __post_init__(self):
+        # Ensure DataFrame attributes are always DataFrames
+        self.dfA = pd.DataFrame() if self.dfA is None or self.dfA.empty else self.dfA
+        self.dfB = pd.DataFrame() if self.dfB is None or self.dfB.empty else self.dfB
+        self.dfC = pd.DataFrame() if self.dfC is None or self.dfC.empty else self.dfC
+
 class Pasillo:
-    def __init__(self, nombre):
+    """Represents an aisle in the warehouse where order picking occurs.
+    
+    Attributes:
+        nombre: Identifier for the aisle (A, B, or C)
+        busqueda: Whether the aisle is currently processing an order
+        pedido_actual: The order currently being processed in this aisle
+        cola: Queue of orders waiting to be processed in this aisle
+    """
+    
+    def __init__(self, nombre: str) -> None:
+        """Initialize a new Pasillo instance.
+        
+        Args:
+            nombre: Identifier for the aisle (A, B, or C)
         """
-        Inicializa un objeto Pasillo.
+        self.nombre: str = nombre
+        self.busqueda: bool = False
+        self.pedido_actual: Optional[Pedido] = None
+        self.cola: Deque[Pedido] = deque()
 
-        Parámetros:
-        - nombre (str): El nombre del Pasillo.
-
-        Atributos:
-        - nombre (str): El nombre del Pasillo.
-        - busqueda (bool): Indica si el Pasillo está actualmente buscando un pedido.
-        - pedido_actual: El pedido actual que se está procesando en el Pasillo.
-        - cola (deque): Cola de pedidos esperando ser procesados en el Pasillo.
+    def fin_busqueda(self, hora_inicio: datetime, tiempo: float) -> Optional[Pedido]:
+        """Complete the current order picking in the aisle.
+        
+        Args:
+            hora_inicio: Start time of the picking operation
+            tiempo: Duration of the picking operation in seconds
+            
+        Returns:
+            The completed Pedido if any, None otherwise
+            
+        Raises:
+            ValueError: If the aisle name is not recognized
         """
-        self.nombre = nombre
-        self.busqueda = False
-        self.pedido_actual = None
-        self.cola = deque()
-
-    def fin_busqueda(self, hora_inicio, tiempo):
-        """
-                Finaliza la búsqueda del pedido actual en el Pasillo.
-
-                Parámetros:
-                - hora_inicio: Hora de inicio de la búsqueda.
-                - tiempo: Tiempo tomado para la búsqueda.
-
-                Retorna:
-                - pedido_finalizado: El pedido completado.
-                """
+        if self.pedido_actual is None:
+            return None
+            
         pedido_finalizado = self.pedido_actual
+        
+        # Update the appropriate completion time based on the aisle
         if self.nombre == "A":
             pedido_finalizado.hora_fin_pckA = generar_time(hora_inicio, tiempo)
             pedido_finalizado.fin_pasA = True
@@ -46,22 +103,23 @@ class Pasillo:
             pedido_finalizado.hora_fin_pckC = generar_time(hora_inicio, tiempo)
             pedido_finalizado.fin_pasC = True
         else:
-            print(f'Nombre Pasillo no mapeado {self.nombre}')
+            raise ValueError(f'Nombre de pasillo no reconocido: {self.nombre}')
+            
+        # Load the next order if available
         self.cargar_nuevo_pedido(hora_inicio, tiempo)
         return pedido_finalizado
         # REVISO SI PEDIDO ESTÁ LISTO PARA SER ENVIADO A MESON
 
-    def cargar_nuevo_pedido(self, hora_inicio, tiempo):
+    def cargar_nuevo_pedido(self, hora_inicio: datetime, tiempo: float) -> None:
+        """Load the next order from the queue for processing in the aisle.
+        
+        Args:
+            hora_inicio: Start time of the picking operation
+            tiempo: Current simulation time in seconds
+            
+        Raises:
+            ValueError: If the aisle name is not recognized
         """
-                Carga un nuevo pedido para ser procesado en el Pasillo.
-
-                Parámetros:
-                - hora_inicio: Hora de inicio del procesamiento del nuevo pedido.
-                - tiempo: Tiempo tomado para el procesamiento.
-
-                Retorna:
-                Ninguno
-                """
         if len(self.cola) > 0:
             p = self.cola.popleft()
             if self.nombre == "A":
@@ -75,58 +133,61 @@ class Pasillo:
             self.pedido_actual = p
             self.busqueda = True
         else:
-            # NO HAY PRODUCTOS EN COLA
+            # No more orders in the queue
             self.pedido_actual = None
             self.busqueda = False
 
 
 class Meson:
-    def __init__(self):
+    """Represents a checking station where orders are verified after picking.
+    
+    Attributes:
+        revision: Whether the station is currently verifying an order
+        pedido_actual: The order currently being verified
+        cola: Queue of orders waiting to be verified
+    """
+    
+    def __init__(self) -> None:
+        """Initialize a new Meson instance."""
+        self.revision: bool = False
+        self.pedido_actual: Optional[Pedido] = None
+        self.cola: Deque[Pedido] = deque()
+
+    def nuevo_pedido(self, pedido_finalizado: Pedido, hora_inicio: datetime, 
+                    tiempo: float) -> bool:
+        """Add a new completed order to the checking station.
+        
+        Args:
+            pedido_finalizado: The completed order to be verified
+            hora_inicio: Start time of the verification
+            tiempo: Current simulation time in seconds
+            
+        Returns:
+            bool: True if the order starts verification immediately, 
+                 False if it's added to the queue
         """
-                Inicializa un objeto Meson.
-
-                Atributos:
-                - revision (bool): Indica si el Meson está actualmente bajo revisión.
-                - pedido_actual: El pedido actual que se está procesando en el Meson.
-                - cola (deque): Cola de pedidos esperando ser procesados en el Meson.
-                """
-        self.revision = False
-        self.pedido_actual = None
-        self.cola = deque()
-
-    def nuevo_pedido(self, pedido_finalizado, hora_inicio, tiempo):
-        """
-                Recibe un nuevo pedido completado para procesarlo en el Meson.
-
-                Parámetros:
-                - pedido_finalizado: El pedido completado que se va a procesar.
-                - hora_inicio: Hora de inicio del procesamiento del pedido.
-                - tiempo: Tiempo necesario para el procesamiento.
-
-                Retorna:
-                - bool: True si el pedido se procesa correctamente, False en caso contrario.
-                """
         if self.revision:
             self.cola.append(pedido_finalizado)
             return False
-        else:
-            self.revision = True
-            pedido_finalizado.hora_ini_revision = generar_time(hora_inicio, tiempo)
-            self.pedido_actual = pedido_finalizado
+            
+        self.revision = True
+        pedido_finalizado.hora_ini_revision = generar_time(hora_inicio, tiempo)
+        self.pedido_actual = pedido_finalizado
+        return True
 
-            return True
-
-    def pedido_finalizado(self, hora_inicio, tiempo):
+    def pedido_finalizado(self, hora_inicio: datetime, tiempo: float) -> Optional[Pedido]:
+        """Mark the current order as completed and start the next one if available.
+        
+        Args:
+            hora_inicio: Start time of the completion
+            tiempo: Current simulation time in seconds
+            S
+        Returns:
+            The completed Pedido if any, None otherwise
         """
-                Marca el pedido actual en el Meson como completado.
-
-                Parámetros:
-                - hora_inicio: Hora de inicio de la finalización del pedido.
-                - tiempo: Tiempo necesario para la finalización.
-
-                Retorna:
-                - pedido_completado: El pedido completado.
-                """
+        if self.pedido_actual is None:
+            return None
+            
         pedido_completado = self.pedido_actual
         pedido_completado.mov_entregado = generar_time(hora_inicio, tiempo)
         pedido_completado.hora_fin_revision = generar_time(hora_inicio, tiempo)
@@ -142,86 +203,142 @@ class Meson:
 
 
 class Simulador:
-    def __init__(self, df_dia, df_pasillo, prod_pass, dict_cols, lista_productos, mod_a, mod_b, mod_c, mod_,sim,
-                 resultado_bbdd, hora_dia):
+    """Main simulation class that coordinates the warehouse order picking process.
+    
+    This class manages the simulation of order processing through different warehouse
+    aisles and a final checking station. It handles event scheduling, order processing,
+    and tracks simulation metrics.
+    
+    Attributes:
+        eventos: List of simulation events as (event_name, time, params) tuples
+        pasillos: Dictionary of aisle objects (A, B, C)
+        tiempo: Current simulation time in seconds
+        df_dia: DataFrame containing daily order data
+        total_pedidos: Total number of orders to process
+        hora_inicio: Simulation start time
+        meson: Checking station instance
+        df_pasillo: DataFrame with aisle-specific data
+        prod_pass: Product password/identifier
+        lista_productos: List of product identifiers
+        dict_cols: Dictionary of column mappings
+        verificar_meson: Tracks order status for the checking station
+        completados: List of completed orders
+        resultados: Dictionary for storing simulation results
+        mod_a: Model for aisle A predictions
+        mod_b: Model for aisle B predictions
+        mod_c: Model for aisle C predictions
+        mod_: General model for final processing
+        sim: Whether to run in simulation mode
+        hora_dia: Current day time
+        resultado_bbdd: Database results storage
+    """
+    
+    def __init__(self, 
+                 df_dia: pd.DataFrame,
+                 df_pasillo: pd.DataFrame,
+                 prod_pass: Any,
+                 dict_cols: Dict[str, Any],
+                 lista_productos: List[str],
+                 mod_a: Any,
+                 mod_b: Any,
+                 mod_c: Any,
+                 mod_: Any,
+                 sim: bool,
+                 resultado_bbdd: Any,
+                 hora_dia: datetime,
+                 productos_pasillos_arreglado: Dict[str, List[str]]) -> None:
+        """Initialize the Simulador with the given parameters.
+        
+        Args:
+            df_dia: DataFrame containing daily order data
+            df_pasillo: DataFrame with aisle-specific product data
+            prod_pass: Product password/identifier
+            dict_cols: Dictionary mapping column names
+            lista_productos: List of product identifiers
+            mod_a: Prediction model for aisle A
+            mod_b: Prediction model for aisle B
+            mod_c: Prediction model for aisle C
+            mod_: General prediction model
+            sim: Whether to run in simulation mode
+            resultado_bbdd: Database results storage
+            hora_dia: Current day time
+            productos_pasillos_arreglado: Dictionary of aisle-specific products
         """
-                Inicializa un objeto Simulador.
-
-                Parámetros:
-                - df_dia: DataFrame que contiene los datos diarios.
-                - df_pasillo: DataFrame que contiene los datos del Pasillo.
-                - prod_pass: Contraseña del producto.
-                - dict_cols: Diccionario de columnas.
-                - lista_productos: Lista de productos.
-
-                Atributos:
-                - eventos (list): Lista de eventos de la simulación.
-                - pasillos (dict): Diccionario de objetos Pasillo.
-                - tiempo: Tiempo actual de la simulación.
-                - df_dia: DataFrame que contiene los datos diarios.
-                - total_pedidos: Número total de pedidos en la simulación.
-                - hora_inicio: Hora de inicio de la simulación.
-                - meson: Objeto Meson para el procesamiento de pedidos.
-                - df_pasillo: DataFrame que contiene los datos del Pasillo.
-                - prod_pass: Contraseña del producto.
-                - lista_productos: Lista de productos.
-                - dict_cols: Diccionario de columnas.
-                - verificar_meson: Diccionario para rastrear el estado del Meson para cada pedido.
-                - completados: Lista de pedidos completados.
-                - resultados: Diccionario para almacenar los resultados de la simulación.
-                """
-        self.eventos = []  # (nombre, tiempo, params)
-        self.pasillos = {nombre: Pasillo(nombre) for nombre in ['A', 'B', 'C']}
-        self.tiempo = 0
-        self.df_dia = df_dia.sort_values(by="mov_llamado")
-        # eventos_llegada_sim = self.df_dia.mov_llamado.tolist()
-        self.total_pedidos = len(self.df_dia)
-        self.hora_inicio = self.df_dia.mov_llamado.tolist()[0]
-        self.meson = Meson()
-        self.df_pasillo = df_pasillo
-        self.prod_pass = prod_pass
-        self.lista_productos = lista_productos
-        self.dict_cols = dict_cols
-        self.verificar_meson = {}
-        self.completados = []
-        self.resultados = {}
-        self.mod_a = mod_a
-        self.mod_b = mod_b
-        self.mod_c = mod_c
-        self.mod_ = mod_
-        self.sim = sim
-        self.hora_dia = hora_dia
-        self.resultado_bbdd= resultado_bbdd
-    def proximo_evento(self):
+        # Initialize simulation state
+        self.eventos: List[Tuple[str, float, Any]] = []  # (event_name, time, params)
+        self.pasillos: Dict[str, Pasillo] = {nombre: Pasillo(nombre) for nombre in ['A', 'B', 'C']}
+        self.tiempo: float = 0.0
+        
+        # Store input data and parameters
+        self.df_dia: pd.DataFrame = df_dia.sort_values(by="mov_llamado")
+        self.df_pasillo: pd.DataFrame = df_pasillo
+        self.prod_pass: Any = prod_pass
+        self.lista_productos: List[str] = lista_productos
+        self.dict_cols: Dict[str, Any] = dict_cols
+        
+        # Initialize models
+        self.mod_a: Any = mod_a
+        self.mod_b: Any = mod_b
+        self.mod_c: Any = mod_c
+        self.mod_: Any = mod_
+        
+        # Simulation state tracking
+        self.total_pedidos: int = len(self.df_dia)
+        self.hora_inicio: datetime = self.df_dia.mov_llamado.tolist()[0]
+        self.meson: Meson = Meson()
+        self.verificar_meson: Dict[str, List[bool]] = {}
+        self.completados: List[Pedido] = []
+        self.resultados: Dict[str, Any] = {}
+        
+        # Additional parameters
+        self.sim: bool = sim
+        self.hora_dia: datetime = hora_dia
+        self.resultado_bbdd: Any = resultado_bbdd
+        self.productos_pasillos_arreglado: Dict[str, List[str]] = productos_pasillos_arreglado
+    def proximo_evento(self) -> Tuple[int, Tuple[str, float, Any]]:
+        """Find and remove the next event from the simulation queue.
+        
+        The events are processed in chronological order based on their scheduled time.
+        
+        Returns:
+            A tuple containing:
+            - The index of the next event in the original events list
+            - A tuple with (event_name, event_time, event_params)
+            
+        Raises:
+            IndexError: If there are no events in the queue
         """
-                Encuentra el próximo evento en la simulación.
-
-                Retorna:
-                - posicion_min_tiempo: Posición del evento con el tiempo mínimo.
-                - tupla_menor_tiempo: Tupla que contiene la información del próximo evento.
-                """
-        #print(f'PROXIMO EVENTO {self.eventos}')
-        posicion_min_tiempo = min(range(len(self.eventos)), key=lambda i: self.eventos[i][1])
+        if not self.eventos:
+            raise IndexError("No events in the simulation queue")
+            
+        posicion_min_tiempo = min(
+            range(len(self.eventos)), 
+            key=lambda i: self.eventos[i][1]  # Sort by event time (index 1)
+        )
         tupla_menor_tiempo = self.eventos.pop(posicion_min_tiempo)
         return posicion_min_tiempo, tupla_menor_tiempo
 
-    def accion(self, tupla):
+    def accion(self, tupla: Tuple[str, float, Any]) -> None:
+        """Process an event from the simulation queue.
+        
+        This method handles different types of events in the simulation, including:
+        - Order arrivals ('llega_pedido')
+        - Order completions ('pedido_entregado')
+        - Aisle completions ('pasilloA_finalizado', 'pasilloB_finalizado', 'pasilloC_finalizado')
+        
+        Args:
+            tupla: A tuple containing (event_name, event_time, event_params)
+            
+        Raises:
+            ValueError: If the event name is not recognized
         """
-                Realiza una acción basada en el evento dado.
-
-                Parámetros:
-                - tupla: Tupla que contiene la información del evento.
-
-                Retorna:
-                None
-                """
-
         nombre, tiempo, p = tupla
 
         if nombre == 'llega_pedido':
             self.verificar_meson[p.folio] = [False, False, False]
             if len(p.dfA) > 0:
                 if self.pasillos['A'].busqueda:
+                    # Si hay cola, pasa a la cola
                     self.pasillos['A'].cola.append(p)
                 else:
                     # No hay cola, pasa directamente a ser procesado
@@ -231,11 +348,13 @@ class Simulador:
                     self.eventos.append(('pasilloA_finalizado', self.tiempo + p.predA, p))
 
             else:
+                # Mark as completed for aisle A if not needed
                 p.fin_pasA = True
                 self.verificar_meson[p.folio][0] = True
             if len(p.dfB) > 0:
-
+                # Si está en Pasillo B
                 if self.pasillos['B'].busqueda:
+                    # Si hay cola, pasa a la cola
                     self.pasillos['B'].cola.append(p)
                 else:
                     # No hay cola, pasa directamente a ser procesado
@@ -244,11 +363,14 @@ class Simulador:
                     self.eventos.append(('pasilloB_finalizado', self.tiempo + p.predB, p))
                     self.pasillos['B'].pedido_actual = p
             else:
+                # Mark as completed for aisle B if not needed
                 p.fin_pasB = True
                 self.verificar_meson[p.folio][1] = True
 
             if len(p.dfC) > 0:
+                # Si está en Pasillo C
                 if self.pasillos['C'].busqueda:
+                    # Si hay cola, pasa a la cola
                     self.pasillos['C'].cola.append(p)
                 else:
                     # No hay cola, pasa directamente a ser procesado
@@ -257,17 +379,20 @@ class Simulador:
                     self.eventos.append(('pasilloC_finalizado', self.tiempo + p.predC, p))
                     self.pasillos['C'].pedido_actual = p
             else:
+                # Mark as completed for aisle C if not needed
                 p.fin_pasC = True
                 self.verificar_meson[p.folio][2] = True
-            # reviso los pasillos involucrados en el pasillo
+                
+            # Check if order is ready to be sent to the checking station
 
         elif nombre == 'pedido_entregado':
+            # Process order completion at the checking station
             pedido_completado = self.meson.pedido_finalizado(self.hora_inicio, self.tiempo)
             self.completados.append(pedido_completado)
             if self.meson.revision:
                 p = self.meson.pedido_actual
                 self.eventos.append(('pedido_entregado', self.tiempo + p.pred_, p))
-            print(f'Pedidos completados {len(self.completados)}/{len(self.df_dia)}')
+                print(f'Pedidos completados {len(self.completados)}/{len(self.df_dia)}')
 
         elif nombre == 'pasilloA_finalizado':
             pedido_finalizado = self.pasillos['A'].fin_busqueda(self.hora_inicio, self.tiempo)
@@ -284,7 +409,7 @@ class Simulador:
                 nuevo_pedido = self.meson.nuevo_pedido(pedido_finalizado, self.hora_inicio, self.tiempo)
                 if nuevo_pedido:
                     self.eventos.append(('pedido_entregado', self.tiempo + pedido_finalizado.pred_, pedido_finalizado))
-
+                
         elif nombre == 'pasilloB_finalizado':
             pedido_finalizado = self.pasillos['B'].fin_busqueda(self.hora_inicio, self.tiempo)
             self.verificar_meson[pedido_finalizado.folio][1] = True
@@ -349,7 +474,7 @@ class Simulador:
         for i in range(len(self.df_dia)):
             p = nuevo_pedido(i, self.df_dia, self.df_pasillo, self.prod_pass ,self.dict_cols ,
                              self.lista_productos, self.mod_a, self.mod_b, self.mod_c, simulado=self.sim,
-                             resultado_bbdd=self.resultado_bbdd)
+                             resultado_bbdd=self.resultado_bbdd, productos_pasillos_arreglado=self.productos_pasillos_arreglado)
             delta_time = p.hora_ini_pck - self.hora_inicio
             one_second = np.timedelta64(1000000000, 'ns')
             seconds = convertir_a_int(delta_time / one_second)

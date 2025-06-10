@@ -1,7 +1,8 @@
 import pandas as pd
-from python_scripts.Simulador_clase import *
-from python_scripts.functions import *
-from datetime import timedelta, datetime, date
+from python_scripts.Simulador_clase import Simulador
+from python_scripts.functions import (cargar_modelos, cargar_informacion, cargar_productos_voluminosos,
+                                     cargar_columnas_df, cargar_productos_pasillos, filt_day, producto_pasillo_ultimo)
+from datetime import timedelta, datetime
 import time
 
 # TODO: Si prod_voluminos no cambia, mejor no leerlo todo el tiempo y tenerlo afuera de la iteracion while.
@@ -59,7 +60,7 @@ if simulado:
 else:
 
     prod_vol = cargar_productos_voluminosos()
-
+    productos_pasillos_arreglado = producto_pasillo_ultimo()
     resultados_bbdd = fetch_latest_results(30)
     dict_cols = cargar_columnas_df()
     prod_pass = cargar_productos_pasillos()
@@ -102,7 +103,7 @@ else:
                 #print(f'set folios {folios - folio_bbdd} = {folios}\n{folio_bbdd}')
                 sim = Simulador(df_dia, df_pasillo_, prod_pass, dict_cols, lista_productos, mod_a, mod_b, mod_c, mod_,
                                 simulado,
-                                resultados_bbdd, hora_dia)
+                                resultados_bbdd, hora_dia, productos_pasillos_arreglado)
                 t00 = time.time()
                 sim.run()
                 for p in sim.completados:
