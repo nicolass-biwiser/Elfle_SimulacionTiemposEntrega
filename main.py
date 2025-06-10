@@ -136,7 +136,6 @@ else:
 
                 print(f'Tiempo transcurrido {round(t11 - t00, 2)}')
                 i += 1
-            # FALTA REVISAR TABLAS PARA ENVIAR RESULTADOS
             else:
                 print('NO HAY INFORMACIÓN NUEVA')
                 # No hay información nueva.
@@ -145,6 +144,8 @@ else:
             if datetime.now().hour >= 18:
                 break
     print("Dia finalizado")
+    tin = time.time()
     actualizar_modelos_pck()
-
+    tfin = time.time()
+    print(f'Tiempo transcurrido {round(tfin - tin, 2)}')
 
