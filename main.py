@@ -16,6 +16,8 @@ if simulado:
     cantidad_de_dias = 2
     lista_productos = prod_vol['Cod. Producto'].unique().tolist()
     dict_cols = cargar_columnas_df()
+    productos_pasillos_arreglado = producto_pasillo_ultimo()
+
     prod_pass = cargar_productos_pasillos()
 
     days = [i for i in range(cantidad_de_dias)]
@@ -36,7 +38,7 @@ if simulado:
         df_dia = df_dia.dropna(subset='mov_entregado')
         if len(df_dia) > 0:
             sim = Simulador(df_dia, df_pasillo, prod_pass, dict_cols, lista_productos, mod_a, mod_b, mod_c, mod_,
-                            simulado)
+                            simulado, productos_pasillos_arreglado)
             t00 = time.time()
             sim.run()
             pedidos_completados.extend(sim.completados)

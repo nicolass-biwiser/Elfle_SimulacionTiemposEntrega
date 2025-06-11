@@ -1126,11 +1126,13 @@ def producto_pasillo_ultimo():
     database_url = get_database_url(resultados=True)
     engine = create_engine(database_url)
     
-    df_pasillo = pd.read_sql('select Folio, Producto, Pasillo_A, Pasillo_B, Pasillo_C from pasillo_historico limit 15000', engine)
-    tiempos_pck = pd.read_sql('select mov_folio, mov_fecha from tiempos_pck_historico limit 15000', engine)
+    df_pasillo = pd.read_sql('select TOP 15000 Folio, Producto, Pasillo_A, Pasillo_B, Pasillo_C from pasillo_historico', engine)
+    tiempos_pck = pd.read_sql('select TOP 15000 mov_folio, mov_fecha from tiempos_pck_historico', engine)
 
-    #folios = set(tiempos_pck.mov_folio.unique()).intersection(set(df_pasillo.Folio.unique()))
+    print(df_pasillo.shape)
+    print(tiempos_pck.shape)
     df_pasillo = df_pasillo.merge(tiempos_pck[['mov_folio', 'mov_fecha']], left_on='Folio', right_on='mov_folio', how='left')
+    print("After merge",df_pasillo.shape)
     # Obtener índices de la fila con la última fecha por producto
     df_pasillo['mov_fecha'] = pd.to_datetime(df_pasillo['mov_fecha'])
     idx = df_pasillo.groupby("Producto")["mov_fecha"].idxmax()
