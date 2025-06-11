@@ -2,7 +2,7 @@ import pandas as pd
 from python_scripts.Simulador_clase import Simulador
 from python_scripts.functions import (cargar_modelos, cargar_informacion, cargar_productos_voluminosos,
                                      cargar_columnas_df, cargar_productos_pasillos, filt_day, producto_pasillo_ultimo,
-                                     fetch_latest_results)
+                                     fetch_latest_results, get_database_url, create_engine, actualizar_modelos_pck)
 from datetime import timedelta, datetime
 import time
 
