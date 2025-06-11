@@ -1126,19 +1126,42 @@ def producto_pasillo_ultimo():
     database_url = get_database_url(resultados=True)
     engine = create_engine(database_url)
     
-    df_pasillo = pd.read_sql('select TOP 15000 Folio, Producto, Pasillo_A, Pasillo_B, Pasillo_C from pasillo_historico', engine)
-    tiempos_pck = pd.read_sql('select TOP 15000 mov_folio, mov_fecha from tiempos_pck_historico', engine)
+    fecha_limite = datetime.now() - pd.DateOffset(months=4)
 
-    print(df_pasillo.shape)
-    print(tiempos_pck.shape)
+    # 1. Obtener movimientos de los últimos 4 meses
+    query_tiempos = f"""
+    SELECT mov_folio, mov_fecha
+    FROM tiempos_pck_historico
+    WHERE mov_fecha >= '{fecha_limite.strftime('%Y-%m-%d')}'
+    """
+    tiempos_pck = pd.read_sql(query_tiempos, engine)
+
+    # 2. Obtener los folios únicos
+    folios_filtrados = tiempos_pck["mov_folio"].unique().tolist()
+
+    # Si no hay folios, evita hacer la siguiente consulta
+    if folios_filtrados:
+        # 3. Armar la query para los folios filtrados (usando parámetros seguros)
+        placeholders = ",".join(["%s"] * len(folios_filtrados))
+        query_pasillo = f"""
+        SELECT Folio, Producto, Pasillo_A, Pasillo_B, Pasillo_C
+        FROM pasillo_historico
+        WHERE Folio IN ({placeholders})
+        """
+        df_pasillo = pd.read_sql(query_pasillo, engine, params=folios_filtrados)
+    else:
+        df_pasillo = pd.DataFrame()  # vacío si no hay movimientos recientes
+
+    #print(df_pasillo.shape)
+    #print(tiempos_pck.shape)
     df_pasillo = df_pasillo.merge(tiempos_pck[['mov_folio', 'mov_fecha']], left_on='Folio', right_on='mov_folio', how='left')
-    print("After merge",df_pasillo.shape)
+    #print("After merge",df_pasillo.shape)
     # Obtener índices de la fila con la última fecha por producto
     df_pasillo['mov_fecha'] = pd.to_datetime(df_pasillo['mov_fecha'])
     df_pasillo = df_pasillo[df_pasillo["mov_fecha"].notna()]
-    print("After filter na",df_pasillo.shape)
+    #print("After filter na",df_pasillo.shape)
     idx = df_pasillo.groupby("Producto")["mov_fecha"].idxmax()
-    print("After idx",idx)
+    print(df_pasillo.groupby("Producto")["mov_fecha"].max())
     # Seleccionar las filas correspondientes
     df_ultima = df_pasillo.loc[idx].reset_index(drop=True)
     df_ultima["Pasillo"] = df_ultima[["Pasillo_A", "Pasillo_B", "Pasillo_C"]].idxmax(axis=1)
