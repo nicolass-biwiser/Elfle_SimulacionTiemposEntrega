@@ -1177,13 +1177,14 @@ def producto_pasillo_ultimo():
     for p in prod_problemas_repeticion:
         ultima_aparicion_prod_p = df_ultima[df_ultima.Producto == p]
         if len(ultima_aparicion_prod_p) == 1:
-            if ultima_aparicion_prod_p.Pasillo.values[0] == 'A':
+            print(ultima_aparicion_prod_p.Pasillo.values[0])
+            if ultima_aparicion_prod_p.Pasillo.values[0] == 'Pasillo_A':
                 print(f'Arreglando {p}, pertenece a A')
                 if p in prod_pass['B']:
                     prod_pass['B'].remove(p)
                 if p in prod_pass['C']:
                     prod_pass['C'].remove(p)
-            elif ultima_aparicion_prod_p.Pasillo.values[0] == 'B':
+            elif ultima_aparicion_prod_p.Pasillo.values[0] == 'Pasillo_B':
                 print(f'Arreglando {p}, pertenece a B')
                 if p in prod_pass['A']:
                     prod_pass['A'].remove(p)
