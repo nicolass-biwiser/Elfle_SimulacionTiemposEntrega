@@ -1142,13 +1142,13 @@ def producto_pasillo_ultimo():
     # Si no hay folios, evita hacer la siguiente consulta
     if folios_filtrados:
         # 3. Armar la query para los folios filtrados (usando parámetros seguros)
-        placeholders = ",".join(["%s"] * len(folios_filtrados))
+        placeholders = ','.join([f"'{folio}'" for folio in folios_filtrados])
         query_pasillo = f"""
         SELECT Folio, Producto, Pasillo_A, Pasillo_B, Pasillo_C
         FROM pasillo_historico
         WHERE Folio IN ({placeholders})
         """
-        df_pasillo = pd.read_sql(query_pasillo, engine, params=folios_filtrados)
+        df_pasillo = pd.read_sql(query_pasillo, engine)
     else:
         df_pasillo = pd.DataFrame()  # vacío si no hay movimientos recientes
 
