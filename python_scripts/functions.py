@@ -1135,7 +1135,10 @@ def producto_pasillo_ultimo():
     print("After merge",df_pasillo.shape)
     # Obtener índices de la fila con la última fecha por producto
     df_pasillo['mov_fecha'] = pd.to_datetime(df_pasillo['mov_fecha'])
+    df_pasillo = df_pasillo[df_pasillo["mov_fecha"].notna()]
+    print("After filter na",df_pasillo.shape)
     idx = df_pasillo.groupby("Producto")["mov_fecha"].idxmax()
+    print("After idx",idx)
     # Seleccionar las filas correspondientes
     df_ultima = df_pasillo.loc[idx].reset_index(drop=True)
     df_ultima["Pasillo"] = df_ultima[["Pasillo_A", "Pasillo_B", "Pasillo_C"]].idxmax(axis=1)
