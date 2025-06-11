@@ -1174,6 +1174,8 @@ def producto_pasillo_ultimo():
     AC = A.intersection(C)
     BC = B.intersection(C)
     prod_problemas_repeticion = AB|AC|BC
+    df_pasillo[df_pasillo.Producto == 'D05106500'].to_csv('df_pasillo_D05106500.csv', index=False)
+
     for p in prod_problemas_repeticion:
         ultima_aparicion_prod_p = df_ultima[df_ultima.Producto == p]
         if len(ultima_aparicion_prod_p) == 1:
