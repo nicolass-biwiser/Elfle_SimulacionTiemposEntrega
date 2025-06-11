@@ -1126,7 +1126,7 @@ def producto_pasillo_ultimo():
     database_url = get_database_url(resultados=True)
     engine = create_engine(database_url)
     
-    fecha_limite = datetime.now() - pd.DateOffset(months=4)
+    fecha_limite = datetime.datetime.now() - pd.DateOffset(months=4)
 
     # 1. Obtener movimientos de los últimos 4 meses
     query_tiempos = f"""
