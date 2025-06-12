@@ -1213,7 +1213,7 @@ def cargar_personas_login():
         df = pd.DataFrame()
     return df  
 
-def vw_pckpersonas():
+def cargar_vw_pckpersonas():
     database_url = get_database_url(resultados=False)
     engine = create_engine(database_url)
     query = "SELECT * FROM vw_pckpersonas"
@@ -1224,7 +1224,7 @@ def vw_pckpersonas():
         df = pd.DataFrame()
     return df  
     
-def personas():
+def cargar_personas():
     database_url = get_database_url(resultados=False)
     engine = create_engine(database_url)
     query = "SELECT * FROM personas"
