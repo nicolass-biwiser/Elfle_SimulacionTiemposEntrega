@@ -11,7 +11,8 @@ test3 = False
 test4 = False
 test5= False
 test6 = False
-test7 = True
+test7 = False
+test8 = True
 #df_pasillo, tiempos_pck, prod_vol = cargar_informacion(True)
 # TEST CONEXION BBDD ELFLE + GUARDADO
 if test0:
@@ -120,3 +121,18 @@ if test7:
     df = pd.read_sql('select * from prediccion_pck', engine)
     df = df.drop_duplicates(subset=['Doc','mov_folio','mov_llamado'])
     df.to_sql('prediccion_pck', engine, index=False, if_exists='replace')
+
+
+if test8:
+    df_personas_login = cargar_personas_login()
+    df_vw_pckpersonas = cargar_vw_pckpersonas()
+    df_personas = cargar_personas()
+
+    print(df_personas_login.shape)
+    print(df_personas_login.head())
+    print("-"*20)
+    print(df_vw_pckpersonas.shape)
+    print(df_vw_pckpersonas.head())
+    print("-"*20)
+    print(df_personas.shape)
+    print(df_personas.head())

@@ -1149,6 +1149,7 @@ def producto_pasillo_ultimo():
         WHERE Folio IN ({placeholders})
         """
         df_pasillo = pd.read_sql(query_pasillo, engine)
+        df_pasillo = df_pasillo.drop_duplicates()
     else:
         df_pasillo = pd.DataFrame()  # vacío si no hay movimientos recientes
 
@@ -1161,7 +1162,7 @@ def producto_pasillo_ultimo():
     df_pasillo = df_pasillo[df_pasillo["mov_fecha"].notna()]
     #print("After filter na",df_pasillo.shape)
     idx = df_pasillo.groupby("Producto")["mov_fecha"].idxmax()
-    print(df_pasillo.groupby("Producto")["mov_fecha"].max())
+    #print(df_pasillo.groupby("Producto")["mov_fecha"].max())
     # Seleccionar las filas correspondientes
     df_ultima = df_pasillo.loc[idx].reset_index(drop=True)
     df_ultima["Pasillo"] = df_ultima[["Pasillo_A", "Pasillo_B", "Pasillo_C"]].idxmax(axis=1)
@@ -1174,12 +1175,12 @@ def producto_pasillo_ultimo():
     AC = A.intersection(C)
     BC = B.intersection(C)
     prod_problemas_repeticion = AB|AC|BC
-    df_pasillo[df_pasillo.Producto == 'D05106500'].to_csv('df_pasillo_D05106500.csv', index=False)
+    #df_pasillo[df_pasillo.Producto == 'D05106500'].to_csv('df_pasillo_D05106500.csv', index=False)
 
     for p in prod_problemas_repeticion:
         ultima_aparicion_prod_p = df_ultima[df_ultima.Producto == p]
         if len(ultima_aparicion_prod_p) == 1:
-            print(ultima_aparicion_prod_p.Pasillo.values[0])
+            #print(ultima_aparicion_prod_p.Pasillo.values[0])
             if ultima_aparicion_prod_p.Pasillo.values[0] == 'Pasillo_A':
                 print(f'Arreglando {p}, pertenece a A')
                 if p in prod_pass['B']:
@@ -1201,6 +1202,42 @@ def producto_pasillo_ultimo():
     return prod_pass
             
     
+def cargar_personas_login():
+    database_url = get_database_url(resultados=False)
+    engine = create_engine(database_url)
+    query = "SELECT * FROM personas_login"
+    try:
+        df = pd.read_sql(query, engine)
+    except Exception as e:
+        print(f"Error al cargar personas_login: {e}")
+        df = pd.DataFrame()
+    return df  
+
+def vw_pckpersonas():
+    database_url = get_database_url(resultados=False)
+    engine = create_engine(database_url)
+    query = "SELECT * FROM vw_pckpersonas"
+    try:
+        df = pd.read_sql(query, engine)
+    except Exception as e:
+        print(f"Error al cargar vw_pckpersonas: {e}")
+        df = pd.DataFrame()
+    return df  
     
+def personas():
+    database_url = get_database_url(resultados=False)
+    engine = create_engine(database_url)
+    query = "SELECT * FROM personas"
+    try:
+        df = pd.read_sql(query, engine)
+    except Exception as e:
+        print(f"Error al cargar personas: {e}")
+        df = pd.DataFrame()
+    return df  
     
-    
+# Personas_login = registro de cuando la persona inicia y/o cierra cesión en el capturador
+
+# Vw_pckpersonas = inicio y cierre de cada picking esto es un resumen de la información detallada que tienes tu de cada picking 
+#  y panal va agregar a que pasillo corresponde cada registro
+
+# Personas = identifica per_pft_id = 2 (perfil bodega), pasillos asignados = A,B,C y per_elim = 0 (pickiador activo) 
